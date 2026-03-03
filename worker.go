@@ -1,0 +1,90 @@
+package main
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+// Worker executes HTTP requests and records results into Metrics.
+type Worker struct {
+	cfg     *Config
+	client  *http.Client
+	metrics *Metrics
+}
+
+func NewWorker(cfg *Config, client *http.Client, metrics *Metrics) *Worker {
+	return &Worker{cfg: cfg, client: client, metrics: metrics}
+}
+
+// Do performs one HTTP request and records the outcome.
+func (w *Worker) Do(ctx context.Context) {
+	req, err := w.buildRequest(ctx)
+	if err != nil {
+		w.metrics.RecordRequest(0, 0, "build_error")
+		return
+	}
+
+	start := time.Now()
+	resp, err := w.client.Do(req)
+	latency := time.Since(start)
+
+	if err != nil {
+		w.metrics.RecordRequest(0, latency, classifyError(err.Error()))
+		return
+	}
+	defer resp.Body.Close()
+	// Drain the body so the connection can be reused.
+	io.Copy(io.Discard, resp.Body)
+
+	w.metrics.RecordRequest(resp.StatusCode, latency, "")
+}
+
+func (w *Worker) buildRequest(ctx context.Context) (*http.Request, error) {
+	var body io.Reader
+	if w.cfg.Body != "" {
+		body = strings.NewReader(w.cfg.Body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, w.cfg.Method, w.cfg.URL, body)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range w.cfg.Headers {
+		req.Header.Set(k, v)
+	}
+	if w.cfg.ContentType != "" && req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", w.cfg.ContentType)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", "LoadTest/1.0")
+	}
+
+	return req, nil
+}
+
+// classifyError maps raw error strings to short, stable category keys.
+func classifyError(s string) string {
+	switch {
+	case strings.Contains(s, "connection refused"):
+		return "connection_refused"
+	case strings.Contains(s, "no such host"):
+		return "dns_error"
+	case strings.Contains(s, "connection reset"):
+		return "connection_reset"
+	case strings.Contains(s, "EOF"):
+		return "unexpected_eof"
+	case strings.Contains(s, "timeout") || strings.Contains(s, "Timeout") ||
+		strings.Contains(s, "deadline exceeded"):
+		return "timeout"
+	case strings.Contains(s, "context canceled"):
+		return "canceled"
+	case strings.Contains(s, "too many open files"):
+		return "too_many_open_files"
+	default:
+		return "request_error"
+	}
+}
