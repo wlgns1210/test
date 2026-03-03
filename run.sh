@@ -1,51 +1,67 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────
-#  k6 + Grafana + InfluxDB 부하 테스트 런처 (Ramp-up 패턴)
+#  k6 + Grafana + InfluxDB 부하 테스트 런처
+#
+#  PATTERN 선택:
+#    rampup (기본) - 점진 증가 → 유지 → 감소
+#    step          - 계단식 증가
+#    spike         - 기준 트래픽 → 급등 → 복귀
 #
 #  사용법:
-#    ./run.sh                                    # 기본값으로 실행
-#    RATE=100 ./run.sh                           # 피크 100 req/s
-#    RATE=100 RAMPUP=3m SUSTAIN=5m ./run.sh      # 상세 설정
-#    ./run.sh stop                               # 스택 종료
+#    ./run.sh                                         # rampup 기본값
+#    PATTERN=step RATE=100 ./run.sh                   # step 패턴
+#    PATTERN=spike RATE=200 BASELINE=10 ./run.sh      # spike 패턴
+#    ./run.sh stop                                    # 스택 종료
 # ─────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
+# ── 공통 변수 ─────────────────────────────────────────────────
 URL="${URL:-http://localhost:8080/v1/stress}"
-RATE="${RATE:-56}"         # 피크 req/s  (56 ≈ 200,000 req/h)
-RAMPUP="${RAMPUP:-2m}"     # 0 → RATE 증가 구간
-SUSTAIN="${SUSTAIN:-3m}"   # RATE 유지 구간 (피크)
-RAMPDOWN="${RAMPDOWN:-1m}" # RATE → 0 감소 구간
+RATE="${RATE:-56}"
+PATTERN="${PATTERN:-rampup}"
+
+# ── rampup 전용 변수 ──────────────────────────────────────────
+RAMPUP="${RAMPUP:-2m}"
+SUSTAIN="${SUSTAIN:-3m}"
+RAMPDOWN="${RAMPDOWN:-1m}"
+
+# ── step 전용 변수 ────────────────────────────────────────────
+STEPS="${STEPS:-4}"
+STEP_DURATION="${STEP_DURATION:-1m}"
+# SUSTAIN 공유 (default: 2m for step)
+
+# ── spike 전용 변수 ───────────────────────────────────────────
+BASELINE="${BASELINE:-5}"
+WARMUP="${WARMUP:-1m}"
+SPIKE_DURATION="${SPIKE_DURATION:-30s}"
+COOLDOWN="${COOLDOWN:-1m}"
 
 INFLUX_OUT="influxdb=http://localhost:8086/k6"
 
-# ── 퍼블릭 IP 자동 감지 (EC2 메타데이터 → 로컬 IP → localhost) ──
+# ── 퍼블릭 IP 감지 ────────────────────────────────────────────
 detect_ip() {
   TOKEN=$(curl -sf --max-time 2 \
     -X PUT "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" 2>/dev/null || echo "")
-
   if [[ -n "$TOKEN" ]]; then
     IP=$(curl -sf --max-time 2 \
       -H "X-aws-ec2-metadata-token: $TOKEN" \
       http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "")
     [[ -n "$IP" ]] && echo "$IP" && return
   fi
-
   IP=$(curl -sf --max-time 2 \
     http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "")
   [[ -n "$IP" ]] && echo "$IP" && return
-
   IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
   [[ -n "$IP" ]] && echo "$IP" && return
-
   echo "localhost"
 }
 
 HOST_IP=$(detect_ip)
 GRAFANA_URL="http://${HOST_IP}"
 
-# ── 종료 커맨드 ──────────────────────────────────────────────
+# ── 종료 커맨드 ───────────────────────────────────────────────
 if [[ "${1:-}" == "stop" ]]; then
   echo "🛑  모니터링 스택 종료..."
   docker compose down
@@ -53,25 +69,73 @@ if [[ "${1:-}" == "stop" ]]; then
   exit 0
 fi
 
+# ── 패턴별 정보 출력 함수 ─────────────────────────────────────
+print_pattern_info() {
+  case "${PATTERN}" in
+    rampup)
+      echo "  패턴    : RAMPUP (점진 증가)"
+      echo ""
+      echo "  req/s"
+      echo "   ${RATE} |        ┌──────────┐"
+      echo "      |       /            \\"
+      echo "    0 |──────/              \\────"
+      echo "      | ${RAMPUP} 증가  ${SUSTAIN} 유지  ${RAMPDOWN} 감소"
+      echo ""
+      echo "  변수 설정:"
+      echo "    RATE=${RATE}  RAMPUP=${RAMPUP}  SUSTAIN=${SUSTAIN}  RAMPDOWN=${RAMPDOWN}"
+      ;;
+    step)
+      echo "  패턴    : STEP (계단식 증가)"
+      echo ""
+      echo "  req/s"
+      echo "   ${RATE} |               ┌─────────┐"
+      STEP_VAL=$((RATE * 3 / STEPS))
+      echo "      |          ┌────┘"
+      STEP_VAL=$((RATE * 2 / STEPS))
+      echo "      |     ┌────┘"
+      echo "      |┌────┘"
+      echo "    0 |┘"
+      echo "      | ${STEPS}단계 × ${STEP_DURATION}  피크 ${SUSTAIN} 유지"
+      echo ""
+      echo "  변수 설정:"
+      echo "    RATE=${RATE}  STEPS=${STEPS}  STEP_DURATION=${STEP_DURATION}  SUSTAIN=${SUSTAIN}"
+      ;;
+    spike)
+      echo "  패턴    : SPIKE (급등)"
+      echo ""
+      echo "  req/s"
+      echo "   ${RATE} |          ┌──────┐"
+      echo "      |          │      │"
+      echo "  ${BASELINE} |──────────┘      └──────────"
+      echo "      | ${WARMUP} 준비  ${SPIKE_DURATION} 급등  ${COOLDOWN} 복귀"
+      echo ""
+      echo "  변수 설정:"
+      echo "    RATE=${RATE}  BASELINE=${BASELINE}  WARMUP=${WARMUP}  SPIKE_DURATION=${SPIKE_DURATION}  COOLDOWN=${COOLDOWN}"
+      ;;
+    *)
+      echo "  ❌ 알 수 없는 패턴: ${PATTERN}"
+      echo "     사용 가능: rampup | step | spike"
+      exit 1
+      ;;
+  esac
+}
+
 echo ""
-echo "╔═══════════════════════════════════════════════════════╗"
-echo "║     k6 Load Test + Grafana  (Ramp-up 패턴)           ║"
-echo "╚═══════════════════════════════════════════════════════╝"
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║          k6 Load Test + Grafana Monitoring             ║"
+echo "╚════════════════════════════════════════════════════════╝"
 echo ""
 echo "  URL      : ${URL}"
-echo "  Peak RPS  : ${RATE} req/s  (~$((RATE * 3600)) req/h)"
+echo "  Peak RPS : ${RATE} req/s  (~$((RATE * 3600)) req/h)"
 echo ""
-echo "  ── 트래픽 패턴 ──────────────────────────────────────"
-echo "  [${RAMPUP}]    0 → ${RATE} req/s  (점진 증가)"
-echo "  [${SUSTAIN}]   ${RATE} req/s 유지  (피크)"
-echo "  [${RAMPDOWN}]  ${RATE} → 0 req/s  (점진 감소)"
+print_pattern_info
 echo ""
 
-# ── 1. Docker 스택 시작 ──────────────────────────────────────
+# ── 1. Docker 스택 시작 ───────────────────────────────────────
 echo "🐳  모니터링 스택 시작 (InfluxDB + Grafana)..."
 docker compose up -d
 
-# ── 2. 서비스 준비 대기 ──────────────────────────────────────
+# ── 2. 서비스 준비 대기 ───────────────────────────────────────
 echo "⏳  서비스 준비 중..."
 for i in {1..30}; do
   if curl -sf http://localhost:8086/ping > /dev/null 2>&1 && \
@@ -84,23 +148,30 @@ done
 echo ""
 echo "✅  서비스 준비 완료"
 echo ""
-echo "┌─────────────────────────────────────────────────┐"
-echo "│  📊 Grafana 대시보드                             │"
+echo "┌──────────────────────────────────────────────────────┐"
+echo "│  📊 Grafana 대시보드                                  │"
 echo "│  ${GRAFANA_URL}"
-echo "│  (브라우저에서 위 주소로 접속)                    │"
-echo "└─────────────────────────────────────────────────┘"
+echo "│  (브라우저에서 위 주소로 접속)                         │"
+echo "└──────────────────────────────────────────────────────┘"
 echo ""
 
-# ── 3. k6 실행 ───────────────────────────────────────────────
-echo "🚀  k6 부하 테스트 시작..."
+# ── 3. k6 실행 ────────────────────────────────────────────────
+echo "🚀  k6 부하 테스트 시작  [${PATTERN^^}]..."
 echo ""
 k6 run \
   --out "${INFLUX_OUT}" \
   -e URL="${URL}" \
   -e RATE="${RATE}" \
+  -e PATTERN="${PATTERN}" \
   -e RAMPUP="${RAMPUP}" \
   -e SUSTAIN="${SUSTAIN}" \
   -e RAMPDOWN="${RAMPDOWN}" \
+  -e STEPS="${STEPS}" \
+  -e STEP_DURATION="${STEP_DURATION}" \
+  -e BASELINE="${BASELINE}" \
+  -e WARMUP="${WARMUP}" \
+  -e SPIKE_DURATION="${SPIKE_DURATION}" \
+  -e COOLDOWN="${COOLDOWN}" \
   k6/script.js
 
 echo ""
