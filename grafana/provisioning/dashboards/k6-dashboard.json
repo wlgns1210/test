@@ -33,7 +33,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT sum(\"value\") FROM \"k6_http_reqs\" WHERE $timeFilter",
+        "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE $timeFilter",
         "refId": "A"
       }]
     },
@@ -69,7 +69,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT (1 - mean(\"value\")) * 100 FROM \"k6_http_req_failed\" WHERE $timeFilter",
+        "query": "SELECT (1 - mean(\"value\")) * 100 FROM \"http_req_failed\" WHERE $timeFilter",
         "refId": "A"
       }]
     },
@@ -103,7 +103,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT percentile(\"value\", 95) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
         "refId": "A"
       }]
     },
@@ -130,7 +130,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT last(\"value\") FROM \"k6_vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "query": "SELECT last(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
         "refId": "A"
       }]
     },
@@ -159,7 +159,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) AS \"RPS\" FROM \"k6_http_reqs\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+        "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) AS \"RPS\" FROM \"http_reqs\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
         "refId": "A",
         "alias": "실제 RPS"
       }]
@@ -197,7 +197,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT mean(\"value\") * 100 AS \"에러율\" FROM \"k6_http_req_failed\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+        "query": "SELECT mean(\"value\") * 100 AS \"에러율\" FROM \"http_req_failed\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
         "refId": "A",
         "alias": "에러율 %"
       }]
@@ -260,28 +260,28 @@
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 50) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
           "refId": "A",
           "alias": "P50"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 90) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 90) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
           "refId": "B",
           "alias": "P90"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 95) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
           "refId": "C",
           "alias": "P95"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 99) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
           "refId": "D",
           "alias": "P99"
         }
@@ -312,7 +312,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT mean(\"value\") FROM \"k6_vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "query": "SELECT mean(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
         "refId": "A",
         "alias": "활성 VU"
       }]
@@ -351,14 +351,14 @@
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"k6_iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
           "refId": "A",
           "alias": "완료"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"k6_dropped_iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"dropped_iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
           "refId": "B",
           "alias": "드롭"
         }

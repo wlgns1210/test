@@ -10,4 +10,4 @@ datasources:
     isDefault: true
     editable: true
     jsonData:
-      httpMode: GET
+      httpMode: POST
