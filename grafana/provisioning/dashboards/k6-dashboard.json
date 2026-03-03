@@ -1,0 +1,356 @@
+{
+  "title": "k6 Load Test Dashboard",
+  "uid": "k6-load-test-001",
+  "description": "k6 부하 테스트 실시간 모니터링 (InfluxDB 1.x)",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-5m", "to": "now" },
+  "timezone": "browser",
+  "tags": ["k6", "load-test"],
+  "graphTooltip": 1,
+  "panels": [
+
+    // ── Row 1: 요약 Stat 패널 (y=0, h=4) ────────────────────────
+
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "총 요청 수",
+      "gridPos": { "x": 0,  "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["sum"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT sum(\"value\") FROM \"k6_http_reqs\" WHERE $timeFilter",
+        "refId": "A"
+      }]
+    },
+
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "성공률",
+      "gridPos": { "x": 6,  "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0, "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red",    "value": null },
+              { "color": "orange", "value": 90   },
+              { "color": "green",  "value": 99   }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT (1 - mean(\"value\")) * 100 FROM \"k6_http_req_failed\" WHERE $timeFilter",
+        "refId": "A"
+      }]
+    },
+
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "P95 응답 시간",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "orange", "value": 300  },
+              { "color": "red",    "value": 500  }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT percentile(\"value\", 95) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "refId": "A"
+      }]
+    },
+
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "활성 VU",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "purple", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT last(\"value\") FROM \"k6_vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "refId": "A"
+      }]
+    },
+
+    // ── Row 2: RPS + 에러율 (y=4, h=9) ──────────────────────────
+
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "초당 요청 수 (RPS)",
+      "gridPos": { "x": 0,  "y": 4, "w": 14, "h": 9 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) AS \"RPS\" FROM \"k6_http_reqs\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "refId": "A",
+          "alias": "실제 RPS"
+        }
+      ]
+    },
+
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "에러율 (%)",
+      "gridPos": { "x": 14, "y": 4, "w": 10, "h": 9 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "color": { "mode": "fixed", "fixedColor": "red" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "spanNulls": false,
+            "showPoints": "never"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red",   "value": 5    }
+            ]
+          }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT mean(\"value\") * 100 AS \"에러율\" FROM \"k6_http_req_failed\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+        "refId": "A",
+        "alias": "에러율 %"
+      }]
+    },
+
+    // ── Row 3: 응답 시간 퍼센타일 (y=13, h=10) ───────────────────
+
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "응답 시간 퍼센타일 (ms)",
+      "gridPos": { "x": 0, "y": 13, "w": 24, "h": 10 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true,
+          "calcs": ["mean", "max", "lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "P99" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } },
+                           { "id": "custom.lineWidth", "value": 3 }] },
+          { "matcher": { "id": "byName", "options": "P95" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] },
+          { "matcher": { "id": "byName", "options": "P90" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }] },
+          { "matcher": { "id": "byName", "options": "P50" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT percentile(\"value\", 50) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "refId": "A", "alias": "P50"
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT percentile(\"value\", 90) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "refId": "B", "alias": "P90"
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT percentile(\"value\", 95) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "refId": "C", "alias": "P95"
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT percentile(\"value\", 99) FROM \"k6_http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "refId": "D", "alias": "P99"
+        }
+      ]
+    },
+
+    // ── Row 4: VU 현황 + 드롭 이터레이션 (y=23, h=8) ─────────────
+
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "가상 사용자 수 (VU)",
+      "gridPos": { "x": 0,  "y": 23, "w": 12, "h": 8 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "purple" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 20,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT mean(\"value\") FROM \"k6_vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "refId": "A", "alias": "활성 VU"
+      }]
+    },
+
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "이터레이션 처리 현황 (초당)",
+      "gridPos": { "x": 12, "y": 23, "w": 12, "h": 8 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "none" },
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "spanNulls": false,
+            "showPoints": "never"
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "드롭" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"k6_iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "refId": "A", "alias": "완료"
+        },
+        {
+          "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+          "rawQuery": true,
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"k6_dropped_iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "refId": "B", "alias": "드롭"
+        }
+      ]
+    }
+
+  ]
+}
