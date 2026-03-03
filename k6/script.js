@@ -125,13 +125,18 @@ export default function () {
 
   const res = http.post(TARGET_URL, payload, params);
 
-  const ok = check(res, {
+  // check()는 Grafana/콘솔 표시용 — 두 조건을 별도로 확인
+  check(res, {
     'HTTP 200':        (r) => r.status === 200,
     'latency < 500ms': (r) => r.timings.duration < 500,
   });
 
+  // 성공률은 HTTP 상태코드만으로 판단
+  // (latency는 http_req_duration threshold에서 별도 관리)
+  const httpOk = res.status >= 200 && res.status < 300;
+
   customLatency.add(res.timings.duration);
-  customSuccess.add(ok);
+  customSuccess.add(httpOk);
   customTotal.add(1);
 }
 
