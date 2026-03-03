@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # ── InfluxDB : k6 메트릭 저장소 ──────────────────────────────
   influxdb:
