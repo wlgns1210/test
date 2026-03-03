@@ -36,6 +36,7 @@ type Metrics struct {
 	windowStart time.Time
 	windowReqs  int64
 	lastRPS     float64
+	rpsHistory  []float64 // per-second RPS snapshots (last 60s)
 }
 
 func NewMetrics() *Metrics {
@@ -46,11 +47,12 @@ func NewMetrics() *Metrics {
 		samples:     make([]float64, 0, reservoirSize),
 		startTime:   now,
 		windowStart: now,
+		rpsHistory:  make([]float64, 0, 60),
 	}
 }
 
-// RecordSuccess records a successful response (2xx/3xx).
-// errType should be "" on success; a short category string on failure.
+// RecordRequest records one completed HTTP attempt.
+// errType should be "" on success; a short category string on network/timeout failure.
 func (m *Metrics) RecordRequest(statusCode int, latency time.Duration, errType string) {
 	atomic.AddInt64(&m.totalReqs, 1)
 
@@ -73,7 +75,7 @@ func (m *Metrics) RecordRequest(statusCode int, latency time.Duration, errType s
 
 	m.mu.Lock()
 	m.statusCodes[statusCode]++
-	// Reservoir sampling
+	// Reservoir sampling (Vitter's Algorithm R)
 	m.samplesSeen++
 	if int(m.samplesSeen) <= reservoirSize {
 		m.samples = append(m.samples, latMs)
@@ -88,35 +90,35 @@ func (m *Metrics) RecordRequest(statusCode int, latency time.Duration, errType s
 	m.updateWindow()
 }
 
+// DropRequest records a token that was skipped due to worker pool saturation.
 func (m *Metrics) DropRequest() {
 	atomic.AddInt64(&m.droppedReqs, 1)
 }
 
+// updateWindow tracks per-second RPS using a sliding window.
 func (m *Metrics) updateWindow() {
 	m.windowMu.Lock()
 	m.windowReqs++
 	elapsed := time.Since(m.windowStart)
 	if elapsed >= time.Second {
 		m.lastRPS = float64(m.windowReqs) / elapsed.Seconds()
+		// Append to RPS history, keep last 60 seconds
+		m.rpsHistory = append(m.rpsHistory, m.lastRPS)
+		if len(m.rpsHistory) > 60 {
+			m.rpsHistory = m.rpsHistory[1:]
+		}
 		m.windowReqs = 0
 		m.windowStart = time.Now()
 	}
 	m.windowMu.Unlock()
 }
 
-// TotalRequests returns the total number of requests attempted.
-func (m *Metrics) TotalRequests() int64 { return atomic.LoadInt64(&m.totalReqs) }
+// ── Accessors ─────────────────────────────────────────────────────────────────
 
-// SuccessRequests returns the count of 2xx/3xx responses.
+func (m *Metrics) TotalRequests() int64   { return atomic.LoadInt64(&m.totalReqs) }
 func (m *Metrics) SuccessRequests() int64 { return atomic.LoadInt64(&m.successReqs) }
-
-// FailedRequests returns the count of errors + non-2xx/3xx responses.
-func (m *Metrics) FailedRequests() int64 { return atomic.LoadInt64(&m.failedReqs) }
-
-// DroppedRequests returns the count of tokens skipped due to worker saturation.
+func (m *Metrics) FailedRequests() int64  { return atomic.LoadInt64(&m.failedReqs) }
 func (m *Metrics) DroppedRequests() int64 { return atomic.LoadInt64(&m.droppedReqs) }
-
-// Elapsed returns time since the test started.
 func (m *Metrics) Elapsed() time.Duration { return time.Since(m.startTime) }
 
 // TotalRPS returns overall average requests per second since start.
@@ -128,11 +130,10 @@ func (m *Metrics) TotalRPS() float64 {
 	return float64(atomic.LoadInt64(&m.totalReqs)) / secs
 }
 
-// RecentRPS returns the recent (sliding-window) requests per second.
+// RecentRPS returns the blended recent (sliding-window) requests per second.
 func (m *Metrics) RecentRPS() float64 {
 	m.windowMu.Lock()
 	defer m.windowMu.Unlock()
-
 	elapsed := time.Since(m.windowStart).Seconds()
 	if elapsed > 0.2 {
 		current := float64(m.windowReqs) / elapsed
@@ -142,6 +143,15 @@ func (m *Metrics) RecentRPS() float64 {
 		return (m.lastRPS + current) / 2
 	}
 	return m.lastRPS
+}
+
+// RPSHistory returns a copy of the per-second RPS history (up to last 60 values).
+func (m *Metrics) RPSHistory() []float64 {
+	m.windowMu.Lock()
+	defer m.windowMu.Unlock()
+	out := make([]float64, len(m.rpsHistory))
+	copy(out, m.rpsHistory)
+	return out
 }
 
 // StatusCodes returns a copy of the status code → count map.
@@ -165,6 +175,8 @@ func (m *Metrics) Errors() map[string]int64 {
 	}
 	return out
 }
+
+// ── Latency percentiles ───────────────────────────────────────────────────────
 
 // Percentiles holds latency distribution statistics.
 type Percentiles struct {
