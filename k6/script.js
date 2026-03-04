@@ -1,16 +1,17 @@
 /**
- * k6 Load Test Script — 패턴 선택 + 비정상 트래픽 혼합 + 다중 API 지원
+ * k6 Load Test Script — 패턴 선택 + 비정상 트래픽 혼합 + 다중 API 독립 부하
  *
  * PATTERN 환경변수로 트래픽 패턴 선택:
  *   rampup (기본) : 점진 증가 → 유지 → 감소
  *   step          : 계단식 증가
  *   spike         : 기준 트래픽 → 급등 → 복귀
  *
- * 다중 API 지원 (최대 3개):
+ * 다중 API 독립 부하 (최대 3개):
  *   URL  (또는 URL1) : 첫 번째 대상 URL (default: http://localhost:8080/v1/stress)
  *   URL2             : 두 번째 대상 URL (선택)
  *   URL3             : 세 번째 대상 URL (선택)
- *   → 설정된 URL들에 트래픽이 랜덤하게 균등 분배됨
+ *   → 각 URL이 독립 시나리오로 실행되어 각각 RATE req/s 부하를 받음
+ *   → URL 1개: RATE req/s / 2개: RATE×2 req/s / 3개: RATE×3 req/s
  *
  * 비정상 트래픽:
  *   ABNORMAL_RATE : 전체 요청 중 비정상 요청 비율 (0~100, 기본 0)
@@ -29,7 +30,7 @@
  *   URL / URL1    - 첫 번째 대상 URL (default: http://localhost:8080/v1/stress)
  *   URL2          - 두 번째 대상 URL (선택)
  *   URL3          - 세 번째 대상 URL (선택)
- *   RATE          - 피크 req/s (default: 56)
+ *   RATE          - 각 API 피크 req/s (default: 56)
  *   ABNORMAL_RATE - 비정상 요청 비율 % (default: 0)
  */
 
@@ -55,9 +56,6 @@ const TARGET_URLS = [
   __ENV.URL2 || '',
   __ENV.URL3 || '',
 ].filter(u => u !== '');
-
-// 각 URL에서 베이스 URL 추출 (존재하지 않는 경로 테스트용)
-const BASE_URLS = TARGET_URLS.map(u => u.replace(/\/v\d+\/.*$/, ''));
 
 const INVALID_PATHS = ['/v1/none', '/v1/admin', '/v1/config', '/v1/unknown', '/v1/test'];
 
@@ -106,17 +104,27 @@ function buildStages() {
   ];
 }
 
-export const options = {
-  scenarios: {
-    stress_test: {
+// ── URL별 독립 시나리오 생성 ───────────────────────────────────
+// 각 URL은 별도 시나리오로 실행 → 각각 RATE req/s 독립 부하
+function buildScenarios() {
+  const scenarios = {};
+  TARGET_URLS.forEach((url, i) => {
+    scenarios[`stress_test_url${i + 1}`] = {
       executor:        'ramping-arrival-rate',
       startRate:       0,
       timeUnit:        '1s',
       preAllocatedVUs: 100,
       maxVUs:          500,
       stages:          buildStages(),
-    },
-  },
+      exec:            'runScenario',       // 모든 시나리오가 동일 함수 호출
+      env:             { SCENARIO_URL: url }, // 각 시나리오에 URL 개별 주입
+    };
+  });
+  return scenarios;
+}
+
+export const options = {
+  scenarios: buildScenarios(),
 
   thresholds: {
     http_req_duration:   ['p(90)<500', 'p(99)<1000'],
@@ -138,9 +146,9 @@ function generateRequestId() {
   return String(Math.floor(Math.random() * 1_000_000_000_000)).padStart(12, '0');
 }
 
-// ── 랜덤 URL 인덱스 선택 ──────────────────────────────────────
-function pickUrlIndex() {
-  return Math.floor(Math.random() * TARGET_URLS.length);
+// URL에서 베이스 URL 추출 (존재하지 않는 경로 테스트용)
+function getBaseUrl(url) {
+  return url.replace(/\/v\d+\/.*$/, '');
 }
 
 // ── 비정상 요청 유형명 ────────────────────────────────────────
@@ -156,11 +164,11 @@ const ABNORMAL_TYPE_NAMES = [
 ];
 
 // ── 비정상 요청 전송 ──────────────────────────────────────────
-function sendAbnormalRequest() {
+function sendAbnormalRequest(targetUrl) {
   const typeIdx = Math.floor(Math.random() * 8);
-  const urlIdx  = pickUrlIndex();
+  const baseUrl = getBaseUrl(targetUrl);
 
-  let url            = TARGET_URLS[urlIdx];
+  let url            = targetUrl;
   let payload        = '';
   let expectedStatus = 403;
   const headers      = {
@@ -220,7 +228,7 @@ function sendAbnormalRequest() {
 
     case 7:
       // 존재하지 않는 경로 → 404 기대
-      url = BASE_URLS[urlIdx] + INVALID_PATHS[Math.floor(Math.random() * INVALID_PATHS.length)];
+      url = baseUrl + INVALID_PATHS[Math.floor(Math.random() * INVALID_PATHS.length)];
       payload = JSON.stringify({
         requestid: generateRequestId(),
         uuid:      generateUUID(),
@@ -232,7 +240,7 @@ function sendAbnormalRequest() {
 
   const res = http.post(url, payload, {
     headers,
-    tags: { request_type: 'abnormal', target_url: url },
+    tags: { request_type: 'abnormal', target_url: targetUrl },
   });
 
   const blocked = res.status === expectedStatus;
@@ -256,20 +264,19 @@ function sendAbnormalRequest() {
 }
 
 // ── 정상 요청 전송 ────────────────────────────────────────────
-function sendNormalRequest() {
-  const url     = TARGET_URLS[pickUrlIndex()];
+function sendNormalRequest(targetUrl) {
   const payload = JSON.stringify({
     requestid: generateRequestId(),
     uuid:      generateUUID(),
     length:    256,
   });
 
-  const res = http.post(url, payload, {
+  const res = http.post(targetUrl, payload, {
     headers: {
       'Content-Type': 'application/json',
       'User-Agent':   'k6-load-test/1.0',
     },
-    tags: { request_type: 'normal', target_url: url },
+    tags: { request_type: 'normal', target_url: targetUrl },
   });
 
   check(res, {
@@ -283,12 +290,16 @@ function sendNormalRequest() {
   customTotal.add(1);
 }
 
-// ── 메인 VU 함수 ──────────────────────────────────────────────
-export default function () {
+// ── 시나리오 실행 함수 ────────────────────────────────────────
+// 각 URL별 독립 시나리오에서 호출됨
+// __ENV.SCENARIO_URL : 해당 시나리오에 주입된 개별 URL
+export function runScenario() {
+  const url = __ENV.SCENARIO_URL;
+
   if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
-    sendAbnormalRequest();
+    sendAbnormalRequest(url);
   } else {
-    sendNormalRequest();
+    sendNormalRequest(url);
   }
 }
 
@@ -307,10 +318,11 @@ export function handleSummary(data) {
   const abnormalCount = abnormal ? abnormal.values.count                  : 0;
   const wafRate       = waf      ? (waf.values.rate * 100).toFixed(2)     : 'N/A';
 
-  // 다중 URL 정보 출력
-  const urlSection = TARGET_URLS.length > 1
-    ? `\n  대상 URL (${TARGET_URLS.length}개 균등 분배):\n` +
-      TARGET_URLS.map((u, i) => `    URL${i + 1}: ${u}`).join('\n')
+  const urlCount   = TARGET_URLS.length;
+  const urlSection = urlCount > 1
+    ? `\n  대상 URL (${urlCount}개 — 각각 ${RATE} req/s 독립 부하):\n` +
+      TARGET_URLS.map((u, i) => `    URL${i + 1}: ${u}`).join('\n') +
+      `\n  총 최대 RPS     : ~${RATE * urlCount} req/s`
     : `\n  대상 URL  : ${TARGET_URLS[0]}`;
 
   const abnormalSection = ABNORMAL_RATE > 0 ? `
@@ -322,10 +334,10 @@ export function handleSummary(data) {
 ══════════════════════════════════════════════
   k6 테스트 완료  [패턴: ${PATTERN.toUpperCase()}]
 ══════════════════════════════════════════════${urlSection}
-  RPS (평균)  : ${rps} req/s
-  P90 latency : ${p90} ms
-  P99 latency : ${p99} ms
-  Error rate  : ${failRate} %${abnormalSection}
+  RPS (전체 합계) : ${rps} req/s
+  P90 latency     : ${p90} ms
+  P99 latency     : ${p99} ms
+  Error rate      : ${failRate} %${abnormalSection}
 ══════════════════════════════════════════════`);
 
   return {};
