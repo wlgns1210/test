@@ -28,7 +28,7 @@ RAMPDOWN="${RAMPDOWN:-1m}"
 
 # ── step 전용 변수 ────────────────────────────────────────────
 STEPS="${STEPS:-4}"
-STEP_DURATION="${STEP_DURATION:-2m}"
+STEP_DURATION="${STEP_DURATION:-1m}"
 # SUSTAIN 공유 (default: 2m for step)
 
 # ── spike 전용 변수 ───────────────────────────────────────────

@@ -37,7 +37,7 @@ const PATTERN    = (__ENV.PATTERN || 'rampup').toLowerCase();
 function buildStages() {
   if (PATTERN === 'step') {
     const steps        = parseInt(__ENV.STEPS         || '4');
-    const stepDuration = __ENV.STEP_DURATION          || '2m';
+    const stepDuration = __ENV.STEP_DURATION          || '1m';
     const sustain      = __ENV.SUSTAIN                || '2m';
 
     const stages = [];
