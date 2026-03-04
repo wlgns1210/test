@@ -79,7 +79,7 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "P95 응답 시간",
+      "title": "P90 응답 시간",
       "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
       "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
       "options": {
@@ -106,7 +106,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
+        "query": "SELECT percentile(\"value\", 90) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
         "refId": "A"
       }]
     },
