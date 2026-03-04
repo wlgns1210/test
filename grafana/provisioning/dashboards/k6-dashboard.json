@@ -106,7 +106,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
         "refId": "A"
       }]
     },
@@ -134,7 +134,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT last(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "query": "SELECT last(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time(1m) fill(0)",
         "refId": "A"
       }]
     },
@@ -156,7 +156,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 15,
-            "spanNulls": false,
+            "spanNulls": true,
             "showPoints": "never"
           }
         }
@@ -188,7 +188,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 20,
-            "spanNulls": false,
+            "spanNulls": true,
             "showPoints": "never"
           },
           "thresholds": {
@@ -231,7 +231,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 5,
-            "spanNulls": false,
+            "spanNulls": true,
             "showPoints": "never"
           }
         },
@@ -267,28 +267,28 @@
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
+          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
           "refId": "A",
           "alias": "P50"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 90) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
+          "query": "SELECT percentile(\"value\", 90) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
           "refId": "B",
           "alias": "P90"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
+          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
           "refId": "C",
           "alias": "P95"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
+          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(previous)",
           "refId": "D",
           "alias": "P99"
         }
@@ -312,7 +312,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 20,
-            "spanNulls": false,
+            "spanNulls": true,
             "showPoints": "never"
           }
         }
@@ -320,7 +320,7 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT mean(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
+        "query": "SELECT mean(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time(1m) fill(0)",
         "refId": "A",
         "alias": "활성 VU"
       }]
@@ -343,7 +343,7 @@
           "custom": {
             "lineWidth": 2,
             "fillOpacity": 10,
-            "spanNulls": false,
+            "spanNulls": true,
             "showPoints": "never"
           }
         },
