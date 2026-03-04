@@ -42,9 +42,12 @@ function buildStages() {
 
     const stages = [];
     for (let i = 1; i <= steps; i++) {
-      stages.push({ duration: stepDuration, target: Math.round(RATE * i / steps) });
+      const stepRate = Math.round(RATE * i / steps);
+      stages.push({ duration: '1s',         target: stepRate });  // 즉시 점프
+      stages.push({ duration: stepDuration, target: stepRate });  // 해당 레벨 유지
     }
-    stages.push({ duration: sustain, target: RATE }); // 피크 유지
+    stages.push({ duration: '1s',     target: RATE }); // 피크 즉시 점프
+    stages.push({ duration: sustain,  target: RATE }); // 피크 유지
     return stages;
   }
 
