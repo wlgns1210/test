@@ -123,6 +123,18 @@ function generateRequestId() {
   return String(Math.floor(Math.random() * 1_000_000_000_000)).padStart(12, '0');
 }
 
+// ── 비정상 요청 유형명 ────────────────────────────────────────
+const ABNORMAL_TYPE_NAMES = [
+  '빈 바디',
+  '필수 필드 누락 (requestid/uuid 없음)',
+  '잘못된 JSON 형식',
+  'SQL 인젝션 패턴',
+  'XSS 패턴',
+  '초대용량 페이로드 (10KB)',
+  '잘못된 Content-Type (text/plain)',
+  '존재하지 않는 경로',
+];
+
 // ── 비정상 요청 전송 ──────────────────────────────────────────
 function sendAbnormalRequest() {
   const typeIdx = Math.floor(Math.random() * 8);
@@ -207,6 +219,16 @@ function sendAbnormalRequest() {
   check(res, {
     [`비정상 차단 (${expectedStatus})`]: (r) => r.status === expectedStatus,
   });
+
+  // 차단 실패 시 어떤 유형이 통과됐는지 로그 출력
+  if (!blocked) {
+    console.warn(
+      `[차단 실패] 유형: ${ABNORMAL_TYPE_NAMES[typeIdx]}` +
+      ` | 기대: ${expectedStatus}` +
+      ` | 실제: ${res.status}` +
+      ` | URL: ${url}`
+    );
+  }
 
   abnormalTotal.add(1);
   wafBlockRate.add(blocked);
