@@ -1,10 +1,16 @@
 /**
- * k6 Load Test Script — 패턴 선택 + 비정상 트래픽 혼합
+ * k6 Load Test Script — 패턴 선택 + 비정상 트래픽 혼합 + 다중 API 지원
  *
  * PATTERN 환경변수로 트래픽 패턴 선택:
  *   rampup (기본) : 점진 증가 → 유지 → 감소
  *   step          : 계단식 증가
  *   spike         : 기준 트래픽 → 급등 → 복귀
+ *
+ * 다중 API 지원 (최대 3개):
+ *   URL  (또는 URL1) : 첫 번째 대상 URL (default: http://localhost:8080/v1/stress)
+ *   URL2             : 두 번째 대상 URL (선택)
+ *   URL3             : 세 번째 대상 URL (선택)
+ *   → 설정된 URL들에 트래픽이 랜덤하게 균등 분배됨
  *
  * 비정상 트래픽:
  *   ABNORMAL_RATE : 전체 요청 중 비정상 요청 비율 (0~100, 기본 0)
@@ -20,7 +26,9 @@
  *     8. 존재하지 않는 경로       → 404 기대
  *
  * 공통 변수:
- *   URL           - 대상 URL (default: http://localhost:8080/v1/stress)
+ *   URL / URL1    - 첫 번째 대상 URL (default: http://localhost:8080/v1/stress)
+ *   URL2          - 두 번째 대상 URL (선택)
+ *   URL3          - 세 번째 대상 URL (선택)
  *   RATE          - 피크 req/s (default: 56)
  *   ABNORMAL_RATE - 비정상 요청 비율 % (default: 0)
  */
@@ -33,17 +41,24 @@ import { Trend, Rate, Counter } from 'k6/metrics';
 const customLatency  = new Trend('stress_latency_ms', true);
 const customSuccess  = new Rate('stress_success_rate');
 const customTotal    = new Counter('stress_total_requests');
-const abnormalTotal  = new Counter('stress_abnormal_requests');  // 비정상 요청 수
-const wafBlockRate   = new Rate('stress_waf_block_rate');        // WAF 차단 성공률
+const abnormalTotal  = new Counter('stress_abnormal_requests');
+const wafBlockRate   = new Rate('stress_waf_block_rate');
 
 // ── 공통 변수 ─────────────────────────────────────────────────
-const TARGET_URL    = __ENV.URL          || 'http://localhost:8080/v1/stress';
 const RATE          = parseInt(__ENV.RATE          || '56');
 const PATTERN       = (__ENV.PATTERN     || 'rampup').toLowerCase();
-const ABNORMAL_RATE = parseInt(__ENV.ABNORMAL_RATE || '0');  // 0~100 %
+const ABNORMAL_RATE = parseInt(__ENV.ABNORMAL_RATE || '0');
 
-// 존재하지 않는 경로 (404 테스트용)
-const BASE_URL      = TARGET_URL.replace(/\/v\d+\/.*$/, '');
+// ── 다중 URL 설정 (최대 3개) ───────────────────────────────────
+const TARGET_URLS = [
+  __ENV.URL || __ENV.URL1 || 'http://localhost:8080/v1/stress',
+  __ENV.URL2 || '',
+  __ENV.URL3 || '',
+].filter(u => u !== '');
+
+// 각 URL에서 베이스 URL 추출 (존재하지 않는 경로 테스트용)
+const BASE_URLS = TARGET_URLS.map(u => u.replace(/\/v\d+\/.*$/, ''));
+
 const INVALID_PATHS = ['/v1/none', '/v1/admin', '/v1/config', '/v1/unknown', '/v1/test'];
 
 // ── 패턴별 stage 계산 ─────────────────────────────────────────
@@ -123,6 +138,11 @@ function generateRequestId() {
   return String(Math.floor(Math.random() * 1_000_000_000_000)).padStart(12, '0');
 }
 
+// ── 랜덤 URL 인덱스 선택 ──────────────────────────────────────
+function pickUrlIndex() {
+  return Math.floor(Math.random() * TARGET_URLS.length);
+}
+
 // ── 비정상 요청 유형명 ────────────────────────────────────────
 const ABNORMAL_TYPE_NAMES = [
   '빈 바디',
@@ -138,11 +158,12 @@ const ABNORMAL_TYPE_NAMES = [
 // ── 비정상 요청 전송 ──────────────────────────────────────────
 function sendAbnormalRequest() {
   const typeIdx = Math.floor(Math.random() * 8);
+  const urlIdx  = pickUrlIndex();
 
-  let url           = TARGET_URL;
-  let payload       = '';
+  let url            = TARGET_URLS[urlIdx];
+  let payload        = '';
   let expectedStatus = 403;
-  const headers     = {
+  const headers      = {
     'Content-Type': 'application/json',
     'User-Agent':   'k6-load-test/1.0',
   };
@@ -199,7 +220,7 @@ function sendAbnormalRequest() {
 
     case 7:
       // 존재하지 않는 경로 → 404 기대
-      url = BASE_URL + INVALID_PATHS[Math.floor(Math.random() * INVALID_PATHS.length)];
+      url = BASE_URLS[urlIdx] + INVALID_PATHS[Math.floor(Math.random() * INVALID_PATHS.length)];
       payload = JSON.stringify({
         requestid: generateRequestId(),
         uuid:      generateUUID(),
@@ -211,7 +232,7 @@ function sendAbnormalRequest() {
 
   const res = http.post(url, payload, {
     headers,
-    tags: { request_type: 'abnormal' },
+    tags: { request_type: 'abnormal', target_url: url },
   });
 
   const blocked = res.status === expectedStatus;
@@ -236,18 +257,19 @@ function sendAbnormalRequest() {
 
 // ── 정상 요청 전송 ────────────────────────────────────────────
 function sendNormalRequest() {
+  const url     = TARGET_URLS[pickUrlIndex()];
   const payload = JSON.stringify({
     requestid: generateRequestId(),
     uuid:      generateUUID(),
     length:    256,
   });
 
-  const res = http.post(TARGET_URL, payload, {
+  const res = http.post(url, payload, {
     headers: {
       'Content-Type': 'application/json',
       'User-Agent':   'k6-load-test/1.0',
     },
-    tags: { request_type: 'normal' },
+    tags: { request_type: 'normal', target_url: url },
   });
 
   check(res, {
@@ -285,6 +307,12 @@ export function handleSummary(data) {
   const abnormalCount = abnormal ? abnormal.values.count                  : 0;
   const wafRate       = waf      ? (waf.values.rate * 100).toFixed(2)     : 'N/A';
 
+  // 다중 URL 정보 출력
+  const urlSection = TARGET_URLS.length > 1
+    ? `\n  대상 URL (${TARGET_URLS.length}개 균등 분배):\n` +
+      TARGET_URLS.map((u, i) => `    URL${i + 1}: ${u}`).join('\n')
+    : `\n  대상 URL  : ${TARGET_URLS[0]}`;
+
   const abnormalSection = ABNORMAL_RATE > 0 ? `
   ── 비정상 트래픽 ─────────────────────────────
   비정상 요청 수  : ${abnormalCount} 건
@@ -293,7 +321,7 @@ export function handleSummary(data) {
   console.log(`
 ══════════════════════════════════════════════
   k6 테스트 완료  [패턴: ${PATTERN.toUpperCase()}]
-══════════════════════════════════════════════
+══════════════════════════════════════════════${urlSection}
   RPS (평균)  : ${rps} req/s
   P90 latency : ${p90} ms
   P99 latency : ${p99} ms
