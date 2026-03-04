@@ -5,11 +5,12 @@
   "schemaVersion": 38,
   "version": 1,
   "refresh": "5s",
-  "time": { "from": "now-5m", "to": "now" },
+  "time": { "from": "now-30m", "to": "now" },
   "timezone": "browser",
   "tags": ["k6", "load-test"],
   "graphTooltip": 1,
   "panels": [
+
     {
       "id": 1,
       "type": "stat",
@@ -37,6 +38,7 @@
         "refId": "A"
       }]
     },
+
     {
       "id": 2,
       "type": "stat",
@@ -73,6 +75,7 @@
         "refId": "A"
       }]
     },
+
     {
       "id": 3,
       "type": "stat",
@@ -107,6 +110,7 @@
         "refId": "A"
       }]
     },
+
     {
       "id": 4,
       "type": "stat",
@@ -134,6 +138,7 @@
         "refId": "A"
       }]
     },
+
     {
       "id": 5,
       "type": "timeseries",
@@ -159,11 +164,12 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) AS \"RPS\" FROM \"http_reqs\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+        "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) AS \"RPS\" FROM \"http_reqs\" WHERE $timeFilter GROUP BY time(1m) fill(0)",
         "refId": "A",
         "alias": "실제 RPS"
       }]
     },
+
     {
       "id": 6,
       "type": "timeseries",
@@ -197,11 +203,12 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT mean(\"value\") * 100 AS \"에러율\" FROM \"http_req_failed\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+        "query": "SELECT mean(\"value\") * 100 AS \"에러율\" FROM \"http_req_failed\" WHERE $timeFilter GROUP BY time(1m) fill(0)",
         "refId": "A",
         "alias": "에러율 %"
       }]
     },
+
     {
       "id": 7,
       "type": "timeseries",
@@ -260,33 +267,34 @@
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 50) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
           "refId": "A",
           "alias": "P50"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 90) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 90) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
           "refId": "B",
           "alias": "P90"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 95) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
           "refId": "C",
           "alias": "P95"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+          "query": "SELECT percentile(\"value\", 99) FROM \"http_req_duration\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
           "refId": "D",
           "alias": "P99"
         }
       ]
     },
+
     {
       "id": 8,
       "type": "timeseries",
@@ -312,11 +320,12 @@
       "targets": [{
         "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
         "rawQuery": true,
-        "query": "SELECT mean(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+        "query": "SELECT mean(\"value\") FROM \"vus\" WHERE $timeFilter GROUP BY time(1m) fill(null)",
         "refId": "A",
         "alias": "활성 VU"
       }]
     },
+
     {
       "id": 9,
       "type": "timeseries",
@@ -351,18 +360,159 @@
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"iterations\" WHERE $timeFilter GROUP BY time(1m) fill(0)",
           "refId": "A",
           "alias": "완료"
         },
         {
           "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
           "rawQuery": true,
-          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"dropped_iterations\" WHERE $timeFilter GROUP BY time($__interval) fill(0)",
+          "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"dropped_iterations\" WHERE $timeFilter GROUP BY time(1m) fill(0)",
           "refId": "B",
           "alias": "드롭"
         }
       ]
+    },
+
+    {
+      "id": 10,
+      "type": "text",
+      "title": "",
+      "gridPos": { "x": 0, "y": 31, "w": 24, "h": 2 },
+      "options": {
+        "mode": "markdown",
+        "content": "## 📊 전체 테스트 합계 요약 (최근 24시간)"
+      }
+    },
+
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "누적 총 요청 수",
+      "gridPos": { "x": 0, "y": 33, "w": 8, "h": 5 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT sum(\"value\") FROM \"http_reqs\" WHERE time > now() - 24h GROUP BY time(1m) fill(0)",
+        "refId": "A"
+      }]
+    },
+
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "누적 실패 요청 수",
+      "gridPos": { "x": 8, "y": 33, "w": 8, "h": 5 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green",  "value": null },
+              { "color": "orange", "value": 1    },
+              { "color": "red",    "value": 100  }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT sum(\"value\") FROM \"http_req_failed\" WHERE time > now() - 24h GROUP BY time(1m) fill(0)",
+        "refId": "A"
+      }]
+    },
+
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "전체 평균 RPS",
+      "gridPos": { "x": 16, "y": 33, "w": 8, "h": 5 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "reduceOptions": { "calcs": ["mean"], "fields": "", "values": false },
+        "orientation": "auto",
+        "textMode": "value_and_name",
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "decimals": 1,
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT non_negative_derivative(sum(\"value\"), 1s) FROM \"http_reqs\" WHERE time > now() - 24h GROUP BY time(1m) fill(0)",
+        "refId": "A"
+      }]
+    },
+
+    {
+      "id": 14,
+      "type": "barchart",
+      "title": "분당 요청 수 (누적 24h)",
+      "gridPos": { "x": 0, "y": 38, "w": 24, "h": 8 },
+      "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+      "options": {
+        "barWidth": 0.7,
+        "groupWidth": 0.7,
+        "fillOpacity": 80,
+        "gradientMode": "none",
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" },
+        "xTickLabelRotation": -45,
+        "xTickLabelSpacing": 200
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "custom": {
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+          }
+        }
+      },
+      "targets": [{
+        "datasource": { "type": "influxdb", "uid": "influxdb-k6" },
+        "rawQuery": true,
+        "query": "SELECT sum(\"value\") AS \"요청 수\" FROM \"http_reqs\" WHERE time > now() - 24h GROUP BY time(1m) fill(0)",
+        "refId": "A"
+      }]
     }
+
   ]
 }
