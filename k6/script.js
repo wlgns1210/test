@@ -50,15 +50,15 @@ function buildStages() {
 
   if (PATTERN === 'spike') {
     const baseline      = parseInt(__ENV.BASELINE       || '5');
-    const warmup        = __ENV.WARMUP                  || '1m';
-    const spikeDuration = __ENV.SPIKE_DURATION          || '30s';
-    const cooldown      = __ENV.COOLDOWN                || '1m';
+    const warmup        = __ENV.WARMUP                  || '30s';  // 짧은 준비 구간
+    const spikeDuration = __ENV.SPIKE_DURATION          || '3m';   // 충분한 피크 구간
+    const cooldown      = __ENV.COOLDOWN                || '30s';  // 짧은 복귀 구간
 
     return [
-      { duration: warmup,        target: baseline },  // 기준 트래픽 워밍업
-      { duration: '10s',         target: RATE     },  // 급등 (10초)
+      { duration: warmup,        target: baseline },  // 기준 트래픽 준비
+      { duration: '5s',          target: RATE     },  // 급등 (5초, 빠르게)
       { duration: spikeDuration, target: RATE     },  // 스파이크 유지
-      { duration: '10s',         target: baseline },  // 급감 (10초)
+      { duration: '5s',          target: baseline },  // 급감 (5초, 빠르게)
       { duration: cooldown,      target: baseline },  // 기준 복귀
     ];
   }
@@ -147,7 +147,7 @@ export function handleSummary(data) {
   const fails = data.metrics.http_req_failed;
 
   const rps      = reqs  ? reqs.values.rate.toFixed(2)         : 'N/A';
-  const p95      = dur   ? dur.values['p(95)'].toFixed(2)       : 'N/A';
+  const p90      = dur   ? dur.values['p(90)'].toFixed(2)       : 'N/A';
   const p99      = dur   ? dur.values['p(99)'].toFixed(2)       : 'N/A';
   const failRate = fails ? (fails.values.rate * 100).toFixed(2) : 'N/A';
 
@@ -156,7 +156,7 @@ export function handleSummary(data) {
   k6 테스트 완료  [패턴: ${PATTERN.toUpperCase()}]
 ══════════════════════════════════════════════
   RPS (평균)  : ${rps} req/s
-  P95 latency : ${p95} ms
+  P90 latency : ${p90} ms
   P99 latency : ${p99} ms
   Error rate  : ${failRate} %
 ══════════════════════════════════════════════`);
