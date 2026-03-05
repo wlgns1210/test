@@ -133,15 +133,42 @@ if not apis:
 
 rate = int(os.environ.get('RATE', '56'))
 
-print(len(apis))
-print(rate * len(apis))
-for i, api in enumerate(apis, 1):
-    method  = api.get('method', 'POST').upper()
-    url     = api.get('url', '')
-    name    = api.get('name', '')
-    status  = api.get('expectedStatus', 200)
-    suffix  = f'  ({name})' if name else ''
-    print(f"    {i}. [{method}] {url} → {status}  (~{rate} req/s){suffix}")
+# URL 기준 그룹핑
+groups = {}
+group_order = []
+for api in apis:
+    url = api.get('url', '')
+    if url not in groups:
+        groups[url] = []
+        group_order.append(url)
+    groups[url].append(api)
+
+num_groups = len(group_order)
+print(num_groups)
+print(rate * num_groups)
+
+for i, url in enumerate(group_order, 1):
+    group = groups[url]
+    if len(group) == 1:
+        api    = group[0]
+        method = api.get('method', 'POST').upper()
+        name   = api.get('name', '')
+        status = api.get('expectedStatus', 200)
+        suffix = f'  ({name})' if name else ''
+        print(f"    {i}. [{method}] {url} → {status}  (~{rate} req/s){suffix}")
+    else:
+        total_w = sum(a.get('weight', 1) for a in group)
+        print(f"    {i}. {url}  (합계 {rate} req/s)")
+        for j, api in enumerate(group):
+            method = api.get('method', 'POST').upper()
+            name   = api.get('name', '')
+            status = api.get('expectedStatus', 200)
+            w      = api.get('weight', 1)
+            pct    = w / total_w * 100
+            erps   = rate * w / total_w
+            suffix = f'  ({name})' if name else ''
+            conn   = '└──' if j == len(group) - 1 else '├──'
+            print(f"         {conn} [{method}] → {status}  weight:{w} ({pct:.0f}%  ~{erps:.1f} req/s){suffix}")
 PYEOF
 )
 

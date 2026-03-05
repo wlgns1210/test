@@ -1,5 +1,16 @@
 /**
- * k6 Load Test Script — 다중 API 독립 부하 + 패턴 선택 + 비정상 트래픽
+ * k6 Load Test Script — URL 기준 그룹 독립 부하 + 패턴 선택 + 비정상 트래픽
+ *
+ * ── 시나리오 생성 규칙 ────────────────────────────────────────
+ *   같은 URL, 다른 method  → 하나의 시나리오 (RATE req/s 공유, weight로 비율 분배)
+ *   다른 URL               → 독립 시나리오   (각각 RATE req/s)
+ *
+ *   예시 (RATE=56):
+ *     /v1/product  → 시나리오 1 (56 req/s)
+ *       POST weight:7 → 70%  ~39 req/s
+ *       GET  weight:3 → 30%  ~17 req/s
+ *     /v1/stress   → 시나리오 2 (56 req/s 독립)
+ *       POST         → 100%  56 req/s
  *
  * ── API 설정 (apis.json) ──────────────────────────────────────
  * [
@@ -7,26 +18,26 @@
  *     "name": "상품 등록",
  *     "url": "http://host/v1/product",
  *     "method": "POST",
- *     "headers": { "Content-Type": "application/json" },
- *     "body": {
- *       "requestid": "{{requestid}}",
- *       "uuid": "{{uuid}}",
- *       "id": "item{{random6}}",
- *       "price": "{{randomInt}}"
- *     },
+ *     "weight": 7,                    ← 같은 URL 내 비율 (생략 시 1)
+ *     "body": { "requestid": "{{requestid}}", "uuid": "{{uuid}}", ... },
  *     "expectedStatus": 201
  *   },
  *   {
  *     "name": "상품 조회",
- *     "url": "http://host/v1/product",
+ *     "url": "http://host/v1/product",  ← 같은 URL → 동일 시나리오에 묶임
  *     "method": "GET",
- *     "params": { "id": "item{{random6}}", "requestid": "{{requestid}}", "uuid": "{{uuid}}" },
+ *     "weight": 3,
+ *     "params": { "id": "item{{random6}}", ... },
+ *     "expectedStatus": 200
+ *   },
+ *   {
+ *     "name": "stress",
+ *     "url": "http://host/v1/stress",   ← 다른 URL → 독립 시나리오
+ *     "method": "POST",
+ *     "body": { ... },
  *     "expectedStatus": 200
  *   }
  * ]
- *
- * → apis.json의 각 항목이 독립 시나리오로 실행됨
- * → API가 3개이고 RATE=100이면 총 300 req/s
  *
  * ── 템플릿 변수 ───────────────────────────────────────────────
  *   {{requestid}}  → 12자리 랜덤 숫자 문자열
@@ -35,7 +46,7 @@
  *   {{randomInt}}  → 랜덤 정수 (단독 사용 시 number 타입)
  *
  * ── 환경변수 ─────────────────────────────────────────────────
- *   RATE          - 각 API 피크 req/s (기본: 56)
+ *   RATE          - 각 URL 그룹 피크 req/s (기본: 56)
  *   PATTERN       - 트래픽 패턴: rampup | step | spike (기본: rampup)
  *   ABNORMAL_RATE - 비정상 요청 비율 % (기본: 0)
  */
@@ -61,6 +72,34 @@ const TARGET_CONFIGS = JSON.parse(open('../apis.json'));
 
 if (!TARGET_CONFIGS || TARGET_CONFIGS.length === 0) {
   throw new Error('apis.json에 API 설정이 없습니다. 최소 1개 이상의 API를 등록하세요.');
+}
+
+// ── URL 기준 그룹핑 ───────────────────────────────────────────
+// 같은 URL → 하나의 시나리오 (weight로 method 비율 분배)
+// 다른 URL → 독립 시나리오 (각각 RATE req/s)
+const URL_GROUPS = [];      // [ [cfg, cfg, ...], [cfg], ... ]
+const URL_TO_IDX = {};      // { url: groupIndex }
+
+TARGET_CONFIGS.forEach((cfg) => {
+  const url = cfg.url;
+  if (URL_TO_IDX[url] === undefined) {
+    URL_TO_IDX[url] = URL_GROUPS.length;
+    URL_GROUPS.push([]);
+  }
+  URL_GROUPS[URL_TO_IDX[url]].push(cfg);
+});
+
+// ── 그룹 내 가중치 기반 method 선택 ──────────────────────────
+function pickFromGroup(group) {
+  if (group.length === 1) return group[0];
+
+  const total = group.reduce((s, c) => s + (c.weight || 1), 0);
+  let rand = Math.random() * total;
+  for (const cfg of group) {
+    rand -= (cfg.weight || 1);
+    if (rand <= 0) return cfg;
+  }
+  return group[group.length - 1];
 }
 
 const INVALID_PATHS = ['/v1/none', '/v1/admin', '/v1/config', '/v1/unknown', '/v1/test'];
@@ -110,16 +149,18 @@ function buildStages() {
   ];
 }
 
-// ── API별 독립 시나리오 생성 ───────────────────────────────────
-// apis.json 항목마다 별도 시나리오 → 각 API가 RATE req/s를 독립적으로 받음
-// API 3개 + RATE=100 → 총 300 req/s
+// ── URL 그룹별 독립 시나리오 생성 ────────────────────────────
 function buildScenarios() {
   const scenarios = {};
-  TARGET_CONFIGS.forEach((cfg, i) => {
-    const label = (cfg.name || `api${i + 1}`)
-      .replace(/\s+/g, '_')
+
+  URL_GROUPS.forEach((group, i) => {
+    // 시나리오 레이블: URL 경로 기반
+    const urlPath = group[0].url
+      .replace(/^https?:\/\/[^/]+/, '')   // 호스트 제거
+      .replace(/\//g, '_')
       .replace(/[^\w]/g, '')
-      .toLowerCase();
+      .replace(/^_/, '');
+    const label = urlPath || `group${i + 1}`;
 
     scenarios[`stress_${label}_${i + 1}`] = {
       executor:        'ramping-arrival-rate',
@@ -129,9 +170,10 @@ function buildScenarios() {
       maxVUs:          500,
       stages:          buildStages(),
       exec:            'runScenario',
-      env:             { SCENARIO_INDEX: String(i) },
+      env:             { GROUP_INDEX: String(i) },
     };
   });
+
   return scenarios;
 }
 
@@ -320,10 +362,10 @@ function sendAbnormalRequest(cfg) {
 }
 
 // ── 시나리오 실행 함수 ────────────────────────────────────────
-// SCENARIO_INDEX로 어떤 API 설정을 사용할지 결정
+// GROUP_INDEX로 URL 그룹을 찾고, 그룹 내에서 weight 비율로 method 선택
 export function runScenario() {
-  const idx = parseInt(__ENV.SCENARIO_INDEX);
-  const cfg = TARGET_CONFIGS[idx];
+  const groupIdx = parseInt(__ENV.GROUP_INDEX);
+  const cfg      = pickFromGroup(URL_GROUPS[groupIdx]);
 
   if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
     sendAbnormalRequest(cfg);
@@ -347,11 +389,28 @@ export function handleSummary(data) {
   const abnCnt   = abnormal ? abnormal.values.count            : 0;
   const wafRate  = waf   ? (waf.values.rate * 100).toFixed(2) : 'N/A';
 
-  const apiList = TARGET_CONFIGS.map((c, i) => {
-    const method = (c.method || 'POST').toUpperCase();
-    const name   = c.name ? `  (${c.name})` : '';
-    const status = c.expectedStatus || 200;
-    return `    ${i + 1}. [${method}] ${c.url} → ${status}${name}`;
+  const groupList = URL_GROUPS.map((group, i) => {
+    const url = group[0].url;
+
+    if (group.length === 1) {
+      const c      = group[0];
+      const method = (c.method || 'POST').toUpperCase();
+      const name   = c.name ? `  (${c.name})` : '';
+      return `    ${i + 1}. [${method}] ${url} → ${c.expectedStatus || 200}  (~${RATE} req/s)${name}`;
+    }
+
+    const total   = group.reduce((s, c) => s + (c.weight || 1), 0);
+    const methods = group.map((c, j) => {
+      const method = (c.method || 'POST').toUpperCase();
+      const w      = c.weight || 1;
+      const pct    = (w / total * 100).toFixed(0);
+      const erps   = (RATE * w / total).toFixed(1);
+      const name   = c.name ? `  (${c.name})` : '';
+      const conn   = j === group.length - 1 ? '└──' : '├──';
+      return `         ${conn} [${method}] → ${c.expectedStatus || 200}  weight:${w} (${pct}%  ~${erps} req/s)${name}`;
+    }).join('\n');
+
+    return `    ${i + 1}. ${url}  (합계 ${RATE} req/s)\n${methods}`;
   }).join('\n');
 
   const abnSection = ABNORMAL_RATE > 0 ? `
@@ -363,9 +422,8 @@ export function handleSummary(data) {
 ══════════════════════════════════════════════
   k6 테스트 완료  [패턴: ${PATTERN.toUpperCase()}]
 ══════════════════════════════════════════════
-  대상 API (각각 ${RATE} req/s 독립 부하):
-${apiList}
-  총 최대 RPS     : ~${RATE * TARGET_CONFIGS.length} req/s
+  대상 API (URL 그룹 ${URL_GROUPS.length}개, 총 ~${RATE * URL_GROUPS.length} req/s):
+${groupList}
   RPS (전체 합계) : ${rps} req/s
   P90 latency     : ${p90} ms
   P99 latency     : ${p99} ms
