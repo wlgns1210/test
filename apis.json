@@ -3,6 +3,7 @@
     "name": "상품 등록",
     "url": "http://localhost:8080/v1/product",
     "method": "POST",
+    "weight": 7,
     "headers": {
       "Content-Type": "application/json"
     },
@@ -19,6 +20,7 @@
     "name": "상품 조회",
     "url": "http://localhost:8080/v1/product",
     "method": "GET",
+    "weight": 3,
     "params": {
       "id": "dbdump{{random6}}",
       "requestid": "{{requestid}}",
@@ -30,6 +32,7 @@
     "name": "헬스체크",
     "url": "http://localhost:8080/healthcheck",
     "method": "GET",
+    "weight": 1,
     "expectedStatus": 200
   }
 ]
