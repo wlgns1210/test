@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Load Test Platform — 어드민</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.4} }
+    .pulse-dot { animation: pulse-dot 1.2s infinite; }
+    #log-panel::-webkit-scrollbar { width: 6px; }
+    #log-panel::-webkit-scrollbar-track { background: #111827; }
+    #log-panel::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+  <!-- NavBar -->
+  <nav class="bg-white border-b border-slate-200 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg bg-red-600 flex items-center justify-center">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </div>
+        <span class="font-semibold text-slate-800">Load Test Platform</span>
+        <span class="px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium ml-1">Admin</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-sm text-slate-500">{{.Username}}</span>
+        <a href="/user" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium">API 설정</a>
+        <form method="POST" action="/logout" class="inline">
+          <button class="text-sm text-slate-500 hover:text-slate-700 transition">로그아웃</button>
+        </form>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 메인 -->
+  <main class="max-w-7xl mx-auto px-4 py-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+      <!-- 왼쪽 패널 -->
+      <div class="lg:col-span-1 space-y-5">
+
+        <!-- 현재 API 목록 -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-slate-700 text-sm">등록된 API 목록</h3>
+            <a href="/user" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">편집 →</a>
+          </div>
+          <div id="api-table" class="space-y-2">
+            {{range .APIs}}
+            <div class="flex items-start gap-2 p-2.5 bg-slate-50 rounded-lg">
+              <span class="px-1.5 py-0.5 text-xs font-bold rounded
+                {{if eq .Method "GET"}}bg-emerald-100 text-emerald-700
+                {{else if eq .Method "POST"}}bg-blue-100 text-blue-700
+                {{else if eq .Method "PUT"}}bg-amber-100 text-amber-700
+                {{else if eq .Method "DELETE"}}bg-red-100 text-red-700
+                {{else}}bg-slate-100 text-slate-700{{end}}">{{.Method}}</span>
+              <div class="min-w-0">
+                {{if .Name}}<div class="text-xs font-medium text-slate-700">{{.Name}}</div>{{end}}
+                <div class="text-xs text-slate-500 truncate">{{.URL}}</div>
+                <div class="text-xs text-slate-400">weight: {{.Weight}} | {{.ExpectedStatus}}</div>
+              </div>
+            </div>
+            {{else}}
+            <div class="text-sm text-slate-400 text-center py-4">
+              등록된 API가 없습니다.<br>
+              <a href="/user" class="text-indigo-600 hover:underline">API 설정 페이지</a>에서 추가하세요.
+            </div>
+            {{end}}
+          </div>
+        </div>
+
+        <!-- 테스트 설정 -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <h3 class="font-semibold text-slate-700 text-sm mb-4">테스트 설정</h3>
+
+          <div class="space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-500 mb-1">RATE (req/s per group)</label>
+                <input type="number" id="cfg-rate" min="1" value="{{.Config.Rate}}"
+                  class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-500 mb-1">비정상 요청 비율 (%)</label>
+                <input type="number" id="cfg-abnormal" min="0" max="100" value="{{.Config.AbnormalRate}}"
+                  class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-500 mb-1">패턴</label>
+              <select id="cfg-pattern" onchange="onPatternChange()"
+                class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
+                <option value="rampup" {{if eq .Config.Pattern "rampup"}}selected{{end}}>rampup — 점진 증가</option>
+                <option value="step" {{if eq .Config.Pattern "step"}}selected{{end}}>step — 계단식 증가</option>
+                <option value="spike" {{if eq .Config.Pattern "spike"}}selected{{end}}>spike — 급등 패턴</option>
+              </select>
+            </div>
+
+            <!-- rampup 옵션 -->
+            <div id="opt-rampup" class="space-y-2">
+              <div class="grid grid-cols-3 gap-2">
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">RAMPUP</label>
+                  <input type="text" id="cfg-rampup" value="{{.Config.Rampup}}" placeholder="2m"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">SUSTAIN</label>
+                  <input type="text" id="cfg-sustain" value="{{.Config.Sustain}}" placeholder="3m"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">RAMPDOWN</label>
+                  <input type="text" id="cfg-rampdown" value="{{.Config.Rampdown}}" placeholder="1m"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+              </div>
+            </div>
+
+            <!-- step 옵션 -->
+            <div id="opt-step" class="hidden space-y-2">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">STEPS (단계 수)</label>
+                  <input type="number" id="cfg-steps" value="{{.Config.Steps}}" placeholder="4"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">STEP_DURATION</label>
+                  <input type="text" id="cfg-step-duration" value="{{.Config.StepDuration}}" placeholder="1m"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+              </div>
+            </div>
+
+            <!-- spike 옵션 -->
+            <div id="opt-spike" class="hidden space-y-2">
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">BASELINE (req/s)</label>
+                  <input type="number" id="cfg-baseline" value="{{.Config.Baseline}}" placeholder="5"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">WARMUP</label>
+                  <input type="text" id="cfg-warmup" value="{{.Config.Warmup}}" placeholder="30s"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">SPIKE_DURATION</label>
+                  <input type="text" id="cfg-spike-duration" value="{{.Config.SpikeDuration}}" placeholder="3m"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-500 mb-1">COOLDOWN</label>
+                  <input type="text" id="cfg-cooldown" value="{{.Config.Cooldown}}" placeholder="30s"
+                    class="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
+                </div>
+              </div>
+            </div>
+
+            <button onclick="saveConfig()"
+              class="w-full py-2 px-4 bg-slate-700 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition">
+              설정 저장
+            </button>
+          </div>
+        </div>
+
+        <!-- Grafana 링크 -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
+          <h3 class="font-semibold text-slate-700 text-sm mb-3">모니터링</h3>
+          <a href="http://localhost" target="_blank"
+            class="flex items-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+            </svg>
+            Grafana 대시보드 열기
+          </a>
+        </div>
+      </div>
+
+      <!-- 오른쪽 패널 -->
+      <div class="lg:col-span-2 space-y-5">
+
+        <!-- 테스트 제어 -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-semibold text-slate-700 text-sm">테스트 제어</h3>
+            <!-- 상태 뱃지 -->
+            <div id="status-badge" class="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500">
+              <span class="w-2 h-2 rounded-full bg-slate-400" id="status-dot"></span>
+              <span id="status-text">확인 중...</span>
+            </div>
+          </div>
+
+          <div class="flex gap-3">
+            <button id="btn-start" onclick="startTest()" disabled
+              class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400
+                     text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 text-sm">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+              테스트 시작
+            </button>
+            <button id="btn-stop" onclick="stopTest()" disabled
+              class="flex-1 py-3 bg-red-600 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400
+                     text-white font-semibold rounded-xl transition flex items-center justify-center gap-2 text-sm">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/>
+              </svg>
+              테스트 중지
+            </button>
+          </div>
+
+          <!-- 설정 저장 알림 -->
+          <div id="config-toast" class="hidden mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 text-center font-medium"></div>
+        </div>
+
+        <!-- 로그 패널 -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+          <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
+            <div class="flex items-center gap-2">
+              <h3 class="font-semibold text-slate-700 text-sm">실시간 로그</h3>
+              <div id="sse-indicator" class="flex items-center gap-1 text-xs text-slate-400">
+                <span class="w-2 h-2 rounded-full bg-slate-300" id="sse-dot"></span>
+                <span id="sse-text">연결 중...</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer">
+                <input type="checkbox" id="auto-scroll" checked class="rounded">
+                자동 스크롤
+              </label>
+              <button onclick="clearLogs()"
+                class="text-xs text-slate-400 hover:text-slate-600 font-medium">초기화</button>
+            </div>
+          </div>
+
+          <!-- 터미널 영역 -->
+          <div id="log-panel"
+            class="bg-gray-950 h-96 overflow-y-auto p-4 font-mono text-xs text-green-400 space-y-0.5">
+            <div class="text-slate-500">— 로그가 여기에 표시됩니다 —</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let testStatus = 'idle';
+    let evtSource = null;
+    let autoScroll = true;
+
+    // ─── 패턴 셀렉터 ──────────────────────────────────────────────
+    function onPatternChange() {
+      const p = document.getElementById('cfg-pattern').value;
+      document.getElementById('opt-rampup').classList.toggle('hidden', p !== 'rampup');
+      document.getElementById('opt-step').classList.toggle('hidden', p !== 'step');
+      document.getElementById('opt-spike').classList.toggle('hidden', p !== 'spike');
+    }
+    onPatternChange(); // 초기화
+
+    // ─── 설정 저장 ────────────────────────────────────────────────
+    async function saveConfig() {
+      const cfg = {
+        rate:          parseInt(document.getElementById('cfg-rate').value) || 56,
+        pattern:       document.getElementById('cfg-pattern').value,
+        abnormalRate:  parseInt(document.getElementById('cfg-abnormal').value) || 0,
+        rampup:        document.getElementById('cfg-rampup').value || '2m',
+        sustain:       document.getElementById('cfg-sustain').value || '3m',
+        rampdown:      document.getElementById('cfg-rampdown').value || '1m',
+        steps:         parseInt(document.getElementById('cfg-steps').value) || 4,
+        stepDuration:  document.getElementById('cfg-step-duration').value || '1m',
+        baseline:      parseInt(document.getElementById('cfg-baseline').value) || 5,
+        warmup:        document.getElementById('cfg-warmup').value || '30s',
+        spikeDuration: document.getElementById('cfg-spike-duration').value || '3m',
+        cooldown:      document.getElementById('cfg-cooldown').value || '30s',
+      };
+      const res = await fetch('/api/test/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(cfg),
+      });
+      const toast = document.getElementById('config-toast');
+      toast.textContent = res.ok ? '✅ 설정이 저장되었습니다' : '❌ 저장 실패';
+      toast.classList.remove('hidden');
+      setTimeout(() => toast.classList.add('hidden'), 2500);
+    }
+
+    // ─── 테스트 제어 ──────────────────────────────────────────────
+    async function startTest() {
+      const res = await fetch('/api/test/start', {method: 'POST'});
+      if (res.ok) {
+        updateStatus('running');
+        connectLogs();
+      } else {
+        const text = await res.text();
+        appendLog('❌ 시작 실패: ' + text, 'error');
+      }
+    }
+
+    async function stopTest() {
+      const res = await fetch('/api/test/stop', {method: 'POST'});
+      if (res.ok) {
+        updateStatus('stopped');
+      } else {
+        const text = await res.text();
+        appendLog('❌ 중지 실패: ' + text, 'error');
+      }
+    }
+
+    // ─── 상태 업데이트 ────────────────────────────────────────────
+    function updateStatus(status) {
+      testStatus = status;
+      const badge = document.getElementById('status-badge');
+      const dot = document.getElementById('status-dot');
+      const text = document.getElementById('status-text');
+      const btnStart = document.getElementById('btn-start');
+      const btnStop = document.getElementById('btn-stop');
+
+      if (status === 'running') {
+        badge.className = 'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700';
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-500 pulse-dot';
+        text.textContent = 'RUNNING';
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+      } else if (status === 'stopped') {
+        badge.className = 'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700';
+        dot.className = 'w-2 h-2 rounded-full bg-red-500';
+        text.textContent = 'STOPPED';
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+      } else {
+        badge.className = 'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-500';
+        dot.className = 'w-2 h-2 rounded-full bg-slate-400';
+        text.textContent = 'IDLE';
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+      }
+    }
+
+    // 3초마다 상태 폴링
+    async function pollStatus() {
+      try {
+        const res = await fetch('/api/test/status');
+        const data = await res.json();
+        if (data.status !== testStatus) {
+          updateStatus(data.status);
+          // 실행 중이면 로그 연결
+          if (data.status === 'running' && !evtSource) connectLogs();
+        }
+      } catch(e) {}
+    }
+    setInterval(pollStatus, 3000);
+    pollStatus(); // 즉시 실행
+
+    // ─── SSE 로그 ─────────────────────────────────────────────────
+    function connectLogs() {
+      if (evtSource) {
+        evtSource.close();
+        evtSource = null;
+      }
+
+      evtSource = new EventSource('/api/test/logs');
+      setSSEIndicator(true);
+
+      evtSource.onmessage = (e) => {
+        if (e.data === '__DONE__') {
+          setSSEIndicator(false);
+          evtSource.close();
+          evtSource = null;
+          return;
+        }
+        appendLog(e.data);
+      };
+
+      evtSource.onerror = () => {
+        setSSEIndicator(false);
+        evtSource.close();
+        evtSource = null;
+        // 실행 중이면 3초 후 재연결
+        if (testStatus === 'running') {
+          setTimeout(connectLogs, 3000);
+        }
+      };
+    }
+
+    function setSSEIndicator(connected) {
+      const dot = document.getElementById('sse-dot');
+      const text = document.getElementById('sse-text');
+      if (connected) {
+        dot.className = 'w-2 h-2 rounded-full bg-emerald-500 pulse-dot';
+        text.textContent = '연결됨';
+      } else {
+        dot.className = 'w-2 h-2 rounded-full bg-slate-300';
+        text.textContent = '연결 끊김';
+      }
+    }
+
+    function appendLog(line, type) {
+      const panel = document.getElementById('log-panel');
+
+      // 첫 로그 시 기본 메시지 제거
+      const placeholder = panel.querySelector('.text-slate-500');
+      if (placeholder) placeholder.remove();
+
+      const div = document.createElement('div');
+      div.className = 'leading-5 whitespace-pre-wrap break-all';
+
+      // 컬러 코딩
+      const lower = line.toLowerCase();
+      if (type === 'error' || lower.includes('error') || lower.includes('❌') || lower.includes('failed')) {
+        div.classList.add('text-red-400');
+      } else if (lower.includes('warn') || lower.includes('⚠')) {
+        div.classList.add('text-yellow-400');
+      } else if (lower.includes('✅') || lower.includes('완료') || lower.includes('done') || lower.includes('success')) {
+        div.classList.add('text-emerald-400');
+      } else if (lower.includes('▶') || lower.includes('►')) {
+        div.classList.add('text-blue-400');
+      } else {
+        div.classList.add('text-green-400');
+      }
+
+      div.textContent = line;
+      panel.appendChild(div);
+
+      // 자동 스크롤
+      if (document.getElementById('auto-scroll').checked) {
+        panel.scrollTop = panel.scrollHeight;
+      }
+    }
+
+    function clearLogs() {
+      const panel = document.getElementById('log-panel');
+      panel.innerHTML = '<div class="text-slate-500">— 로그가 초기화되었습니다 —</div>';
+    }
+
+    document.getElementById('auto-scroll').addEventListener('change', (e) => {
+      autoScroll = e.target.checked;
+    });
+
+    // 페이지 로드 시 로그 연결 (기존 로그 히스토리 받기)
+    connectLogs();
+  </script>
+
+</body>
+</html>
