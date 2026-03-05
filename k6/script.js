@@ -1,5 +1,5 @@
 /**
- * k6 Load Test Script — 다중 API 가중 분배 + 패턴 선택 + 비정상 트래픽
+ * k6 Load Test Script — 다중 API 독립 부하 + 패턴 선택 + 비정상 트래픽
  *
  * ── API 설정 (apis.json) ──────────────────────────────────────
  * [
@@ -7,7 +7,6 @@
  *     "name": "상품 등록",
  *     "url": "http://host/v1/product",
  *     "method": "POST",
- *     "weight": 7,                    ← 비율 (생략 시 1)
  *     "headers": { "Content-Type": "application/json" },
  *     "body": {
  *       "requestid": "{{requestid}}",
@@ -21,16 +20,13 @@
  *     "name": "상품 조회",
  *     "url": "http://host/v1/product",
  *     "method": "GET",
- *     "weight": 3,
  *     "params": { "id": "item{{random6}}", "requestid": "{{requestid}}", "uuid": "{{uuid}}" },
  *     "expectedStatus": 200
  *   }
  * ]
  *
- * weight 동작 방식:
- *   RATE = 100, weight [7, 3] 설정 시
- *     → POST: ~70 req/s (70%), GET: ~30 req/s (30%)
- *   weight 미설정 → 모든 API 동일 비율 (1:1:1...)
+ * → apis.json의 각 항목이 독립 시나리오로 실행됨
+ * → API가 3개이고 RATE=100이면 총 300 req/s
  *
  * ── 템플릿 변수 ───────────────────────────────────────────────
  *   {{requestid}}  → 12자리 랜덤 숫자 문자열
@@ -39,7 +35,7 @@
  *   {{randomInt}}  → 랜덤 정수 (단독 사용 시 number 타입)
  *
  * ── 환경변수 ─────────────────────────────────────────────────
- *   RATE          - 전체 합계 req/s (기본: 56)
+ *   RATE          - 각 API 피크 req/s (기본: 56)
  *   PATTERN       - 트래픽 패턴: rampup | step | spike (기본: rampup)
  *   ABNORMAL_RATE - 비정상 요청 비율 % (기본: 0)
  */
@@ -65,26 +61,6 @@ const TARGET_CONFIGS = JSON.parse(open('../apis.json'));
 
 if (!TARGET_CONFIGS || TARGET_CONFIGS.length === 0) {
   throw new Error('apis.json에 API 설정이 없습니다. 최소 1개 이상의 API를 등록하세요.');
-}
-
-// ── 가중치 사전 계산 ──────────────────────────────────────────
-// 각 API의 weight 비율대로 요청이 랜덤 분배됨
-// weight 미설정 시 기본값 1 (동일 비율)
-const TOTAL_WEIGHT = TARGET_CONFIGS.reduce((sum, c) => sum + (c.weight || 1), 0);
-
-// 누적 가중치 배열 (O(1) 선택용)
-const CUM_WEIGHTS = (() => {
-  let cum = 0;
-  return TARGET_CONFIGS.map(c => (cum += (c.weight || 1)));
-})();
-
-// 가중치 기반 API 랜덤 선택
-function pickApiConfig() {
-  const rand = Math.random() * TOTAL_WEIGHT;
-  for (let i = 0; i < CUM_WEIGHTS.length; i++) {
-    if (rand < CUM_WEIGHTS[i]) return TARGET_CONFIGS[i];
-  }
-  return TARGET_CONFIGS[TARGET_CONFIGS.length - 1];
 }
 
 const INVALID_PATHS = ['/v1/none', '/v1/admin', '/v1/config', '/v1/unknown', '/v1/test'];
@@ -134,10 +110,18 @@ function buildStages() {
   ];
 }
 
-// ── 단일 시나리오 (가중치 기반 분배) ─────────────────────────
-export const options = {
-  scenarios: {
-    stress_test: {
+// ── API별 독립 시나리오 생성 ───────────────────────────────────
+// apis.json 항목마다 별도 시나리오 → 각 API가 RATE req/s를 독립적으로 받음
+// API 3개 + RATE=100 → 총 300 req/s
+function buildScenarios() {
+  const scenarios = {};
+  TARGET_CONFIGS.forEach((cfg, i) => {
+    const label = (cfg.name || `api${i + 1}`)
+      .replace(/\s+/g, '_')
+      .replace(/[^\w]/g, '')
+      .toLowerCase();
+
+    scenarios[`stress_${label}_${i + 1}`] = {
       executor:        'ramping-arrival-rate',
       startRate:       0,
       timeUnit:        '1s',
@@ -145,8 +129,14 @@ export const options = {
       maxVUs:          500,
       stages:          buildStages(),
       exec:            'runScenario',
-    },
-  },
+      env:             { SCENARIO_INDEX: String(i) },
+    };
+  });
+  return scenarios;
+}
+
+export const options = {
+  scenarios: buildScenarios(),
 
   thresholds: {
     http_req_duration:   ['p(90)<500', 'p(99)<1000'],
@@ -176,13 +166,11 @@ function getBaseUrl(url) {
 function resolveValue(val) {
   if (typeof val !== 'string') return val;
 
-  // 단일 템플릿 → 타입 보존
   if (val === '{{requestid}}') return generateRequestId();
   if (val === '{{uuid}}')      return generateUUID();
   if (val === '{{random6}}')   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
-  if (val === '{{randomInt}}') return Math.floor(Math.random() * 9000) + 1000; // number
+  if (val === '{{randomInt}}') return Math.floor(Math.random() * 9000) + 1000;
 
-  // 혼합 문자열 → 인라인 치환
   return val
     .replace(/\{\{requestid\}\}/g, () => generateRequestId())
     .replace(/\{\{uuid\}\}/g,      () => generateUUID())
@@ -331,10 +319,11 @@ function sendAbnormalRequest(cfg) {
   wafBlockRate.add(blocked);
 }
 
-// ── 메인 VU 함수 ─────────────────────────────────────────────
-// 매 요청마다 가중치 기반으로 API를 랜덤 선택하여 요청 전송
+// ── 시나리오 실행 함수 ────────────────────────────────────────
+// SCENARIO_INDEX로 어떤 API 설정을 사용할지 결정
 export function runScenario() {
-  const cfg = pickApiConfig();
+  const idx = parseInt(__ENV.SCENARIO_INDEX);
+  const cfg = TARGET_CONFIGS[idx];
 
   if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
     sendAbnormalRequest(cfg);
@@ -362,10 +351,7 @@ export function handleSummary(data) {
     const method = (c.method || 'POST').toUpperCase();
     const name   = c.name ? `  (${c.name})` : '';
     const status = c.expectedStatus || 200;
-    const w      = c.weight || 1;
-    const pct    = (w / TOTAL_WEIGHT * 100).toFixed(0);
-    const erps   = (RATE * w / TOTAL_WEIGHT).toFixed(1);
-    return `    ${i + 1}. [${method}] ${c.url} → ${status}  weight:${w} (${pct}%  ~${erps} req/s)${name}`;
+    return `    ${i + 1}. [${method}] ${c.url} → ${status}${name}`;
   }).join('\n');
 
   const abnSection = ABNORMAL_RATE > 0 ? `
@@ -377,8 +363,9 @@ export function handleSummary(data) {
 ══════════════════════════════════════════════
   k6 테스트 완료  [패턴: ${PATTERN.toUpperCase()}]
 ══════════════════════════════════════════════
-  대상 API (합계 ${RATE} req/s, 가중치 분배):
+  대상 API (각각 ${RATE} req/s 독립 부하):
 ${apiList}
+  총 최대 RPS     : ~${RATE * TARGET_CONFIGS.length} req/s
   RPS (전체 합계) : ${rps} req/s
   P90 latency     : ${p90} ms
   P99 latency     : ${p99} ms
