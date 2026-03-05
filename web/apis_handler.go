@@ -87,7 +87,7 @@ func generateAPIsFromEndpoint(endpoint string) []APIEntry {
 			Name:   "stress",
 			URL:    base + "/v1/stress",
 			Method: "POST",
-			Weight: 3,
+			Weight: 6,
 			Headers: map[string]string{
 				"Content-Type": "application/json",
 			},
