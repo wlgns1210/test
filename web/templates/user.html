@@ -75,9 +75,9 @@
       <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
         <div>
           <h3 class="font-semibold text-slate-700 text-sm">자동 생성되는 API 목록 (고정)</h3>
-          <p class="text-xs text-slate-400 mt-0.5">PDF 명세 기준 6개 API — 엔드포인트 저장 시 자동으로 구성됩니다</p>
+          <p class="text-xs text-slate-400 mt-0.5">PDF 명세 기준 5개 API — 엔드포인트 저장 시 자동으로 구성됩니다</p>
         </div>
-        <span class="px-2.5 py-1 bg-slate-200 text-slate-600 text-xs font-semibold rounded-full">6개</span>
+        <span class="px-2.5 py-1 bg-slate-200 text-slate-600 text-xs font-semibold rounded-full">5개</span>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -101,12 +101,11 @@
 
   <script>
     const FIXED_APIS = [
-      { name: 'user 생성',    method: 'POST', path: '/v1/user',     weight: 3, expected: 201 },
-      { name: 'user 조회',    method: 'GET',  path: '/v1/user',     weight: 3, expected: 200 },
-      { name: 'product 생성', method: 'POST', path: '/v1/product',  weight: 3, expected: 201 },
-      { name: 'product 조회', method: 'GET',  path: '/v1/product',  weight: 3, expected: 200 },
-      { name: 'stress',       method: 'POST', path: '/v1/stress',   weight: 2, expected: 201 },
-      { name: 'healthcheck',  method: 'GET',  path: '/healthcheck', weight: 1, expected: 200 },
+      { name: 'user 생성',    method: 'POST', path: '/v1/user',    weight: 3, expected: 201 },
+      { name: 'user 조회',    method: 'GET',  path: '/v1/user',    weight: 3, expected: 200 },
+      { name: 'product 생성', method: 'POST', path: '/v1/product', weight: 3, expected: 201 },
+      { name: 'product 조회', method: 'GET',  path: '/v1/product', weight: 3, expected: 200 },
+      { name: 'stress',       method: 'POST', path: '/v1/stress',  weight: 2, expected: 201 },
     ];
 
     const METHOD_COLORS = {
