@@ -17,6 +17,7 @@ var templateFS embed.FS
 var (
 	globalStore *AppStore
 	projectRoot string
+	grafanaURL  string
 	templates   *template.Template
 )
 
@@ -37,21 +38,51 @@ func sessionFromContext(ctx context.Context) *Session {
 	return v.(*Session)
 }
 
+// findProjectRoot는 run.sh가 존재하는 디렉토리를 탐색하여 프로젝트 루트를 반환합니다.
+// go run 실행 시 exe 경로가 임시 디렉토리가 되므로, cwd 기반으로 탐색합니다.
+func findProjectRoot() string {
+	// 1순위: 환경변수
+	if dir := os.Getenv("LOADTEST_PROJECT_DIR"); dir != "" {
+		return dir
+	}
+
+	cwd, _ := os.Getwd()
+	if cwd == "" {
+		cwd = "."
+	}
+
+	// 2순위: cwd 및 상위 디렉토리에서 run.sh 탐색
+	candidates := []string{cwd, filepath.Dir(cwd)}
+
+	// exe 경로도 후보에 추가 (컴파일된 바이너리 실행 시)
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates, exeDir, filepath.Dir(exeDir))
+	}
+
+	for _, dir := range candidates {
+		if _, err := os.Stat(filepath.Join(dir, "run.sh")); err == nil {
+			return dir
+		}
+	}
+
+	// 최후 수단: cwd 상위 디렉토리
+	return filepath.Dir(cwd)
+}
+
 func main() {
 	globalStore = NewAppStore()
 
-	// 프로젝트 루트 결정
-	projectRoot = os.Getenv("LOADTEST_PROJECT_DIR")
-	if projectRoot == "" {
-		// web/ 바이너리 위치에서 상위 디렉토리
-		exe, err := os.Executable()
-		if err == nil {
-			projectRoot = filepath.Dir(filepath.Dir(exe))
-		} else {
-			projectRoot = ".."
-		}
-	}
+	// 프로젝트 루트 결정 (run.sh 위치 기준)
+	projectRoot = findProjectRoot()
 	log.Printf("Project root: %s", projectRoot)
+
+	// Grafana URL (환경변수 GRAFANA_URL, 기본값 http://localhost)
+	grafanaURL = os.Getenv("GRAFANA_URL")
+	if grafanaURL == "" {
+		grafanaURL = "http://localhost"
+	}
+	log.Printf("Grafana URL: %s", grafanaURL)
 
 	// 템플릿 로드
 	var err error
@@ -146,10 +177,11 @@ func showAdminPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderTemplate(w, "admin.html", map[string]any{
-		"Username": sess.Username,
-		"APIs":     entries,
-		"Config":   globalStore.GetTestConfig(),
-		"Endpoint": endpoint,
+		"Username":   sess.Username,
+		"APIs":       entries,
+		"Config":     globalStore.GetTestConfig(),
+		"Endpoint":   endpoint,
+		"GrafanaURL": grafanaURL,
 	})
 }
 
