@@ -264,7 +264,7 @@
   </main>
 
   <script>
-    let testStatus = 'idle';
+    let testStatus = '';   // 빈 문자열 → 첫 폴링 시 항상 updateStatus 호출됨
     let evtSource = null;
     let autoScroll = true;
 
