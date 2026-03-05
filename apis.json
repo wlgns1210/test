@@ -1,0 +1,35 @@
+[
+  {
+    "name": "상품 등록",
+    "url": "http://localhost:8080/v1/product",
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "requestid": "{{requestid}}",
+      "uuid": "{{uuid}}",
+      "id": "dbdump{{random6}}",
+      "name": "dbdump{{random6}}",
+      "price": "{{randomInt}}"
+    },
+    "expectedStatus": 201
+  },
+  {
+    "name": "상품 조회",
+    "url": "http://localhost:8080/v1/product",
+    "method": "GET",
+    "params": {
+      "id": "dbdump{{random6}}",
+      "requestid": "{{requestid}}",
+      "uuid": "{{uuid}}"
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "헬스체크",
+    "url": "http://localhost:8080/healthcheck",
+    "method": "GET",
+    "expectedStatus": 200
+  }
+]

