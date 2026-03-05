@@ -48,27 +48,34 @@
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
           <div class="flex items-center justify-between mb-3">
             <h3 class="font-semibold text-slate-700 text-sm">등록된 API 목록</h3>
-            <a href="/user" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">편집 →</a>
+            <a href="/user" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">설정 →</a>
           </div>
-          <div id="api-table" class="space-y-2">
+
+          {{if .Endpoint}}
+          <div class="mb-3 px-3 py-2 bg-indigo-50 border border-indigo-100 rounded-lg">
+            <div class="text-xs font-medium text-indigo-500 mb-0.5">Endpoint</div>
+            <div class="text-xs text-indigo-800 font-mono break-all">{{.Endpoint}}</div>
+          </div>
+          {{end}}
+
+          <div id="api-table" class="space-y-1.5">
             {{range .APIs}}
-            <div class="flex items-start gap-2 p-2.5 bg-slate-50 rounded-lg">
-              <span class="px-1.5 py-0.5 text-xs font-bold rounded
+            <div class="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
+              <span class="shrink-0 px-1.5 py-0.5 text-xs font-bold rounded
                 {{if eq .Method "GET"}}bg-emerald-100 text-emerald-700
                 {{else if eq .Method "POST"}}bg-blue-100 text-blue-700
                 {{else if eq .Method "PUT"}}bg-amber-100 text-amber-700
                 {{else if eq .Method "DELETE"}}bg-red-100 text-red-700
                 {{else}}bg-slate-100 text-slate-700{{end}}">{{.Method}}</span>
-              <div class="min-w-0">
-                {{if .Name}}<div class="text-xs font-medium text-slate-700">{{.Name}}</div>{{end}}
-                <div class="text-xs text-slate-500 truncate">{{.URL}}</div>
-                <div class="text-xs text-slate-400">weight: {{.Weight}} | {{.ExpectedStatus}}</div>
+              <div class="min-w-0 flex-1 flex items-center justify-between gap-2">
+                <span class="text-xs font-medium text-slate-700 truncate">{{if .Name}}{{.Name}}{{else}}{{.URL}}{{end}}</span>
+                <span class="shrink-0 text-xs text-slate-400">w:{{.Weight}} | {{.ExpectedStatus}}</span>
               </div>
             </div>
             {{else}}
             <div class="text-sm text-slate-400 text-center py-4">
-              등록된 API가 없습니다.<br>
-              <a href="/user" class="text-indigo-600 hover:underline">API 설정 페이지</a>에서 추가하세요.
+              엔드포인트가 설정되지 않았습니다.<br>
+              <a href="/user" class="text-indigo-600 hover:underline">설정 페이지</a>에서 입력하세요.
             </div>
             {{end}}
           </div>

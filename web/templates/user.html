@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Load Test Platform — API 설정</title>
+  <title>Load Test Platform — 엔드포인트 설정</title>
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 min-h-screen">
 
   <!-- NavBar -->
   <nav class="bg-white border-b border-slate-200 shadow-sm">
-    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+    <div class="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
       <div class="flex items-center gap-2">
         <div class="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
           <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -34,345 +34,131 @@
     </div>
   </nav>
 
+  <!-- 토스트 -->
+  <div id="toast" class="hidden fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all"></div>
+
   <!-- 메인 -->
   <main class="max-w-4xl mx-auto px-4 py-8">
 
     <!-- 헤더 -->
     <div class="mb-6">
-      <h2 class="text-xl font-bold text-slate-800">API 엔드포인트 설정</h2>
+      <h2 class="text-xl font-bold text-slate-800">부하 테스트 대상 설정</h2>
       <p class="text-slate-500 text-sm mt-1">
-        부하 테스트를 받을 API 목록을 설정합니다. 저장하면 어드민이 테스트를 시작할 수 있습니다.
+        부하를 받을 서버의 기본 URL을 입력하면, 아래 정해진 API 형식으로 자동 구성됩니다.
       </p>
     </div>
 
-    <!-- 토스트 메시지 -->
-    <div id="toast" class="hidden fixed top-4 right-4 z-50 px-5 py-3 rounded-xl shadow-lg text-white text-sm font-medium transition-all"></div>
+    <!-- 엔드포인트 입력 카드 -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+      <label for="endpoint-input" class="block text-sm font-semibold text-slate-700 mb-2">
+        서버 기본 URL (Endpoint)
+      </label>
+      <div class="flex gap-3">
+        <input type="url" id="endpoint-input"
+          value="{{.Endpoint}}"
+          placeholder="https://your-alb.amazonaws.com"
+          oninput="updatePreview()"
+          class="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+        <button onclick="saveEndpoint()"
+          class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow transition text-sm flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          저장
+        </button>
+      </div>
+      <p class="text-xs text-slate-400 mt-2">예: https://my-server.example.com &nbsp;(경로 제외한 기본 URL만 입력)</p>
+    </div>
 
-    <!-- API 엔트리 목록 -->
-    <div id="api-list" class="space-y-4"></div>
-
-    <!-- 추가 버튼 -->
-    <button onclick="addEntry()"
-      class="mt-4 w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500
-             hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 transition text-sm font-medium flex items-center justify-center gap-2">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
-      API 엔트리 추가
-    </button>
-
-    <!-- 저장 버튼 -->
-    <div class="mt-6 flex justify-end">
-      <button onclick="saveAPIs()"
-        class="px-8 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow transition text-sm flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        설정 저장
-      </button>
+    <!-- API 프리뷰 -->
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-slate-700 text-sm">자동 생성되는 API 목록 (고정)</h3>
+          <p class="text-xs text-slate-400 mt-0.5">PDF 명세 기준 6개 API — 엔드포인트 저장 시 자동으로 구성됩니다</p>
+        </div>
+        <span class="px-2.5 py-1 bg-slate-200 text-slate-600 text-xs font-semibold rounded-full">6개</span>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-xs font-medium text-slate-500 bg-slate-50 border-b border-slate-100">
+              <th class="px-4 py-2.5 text-left w-8">#</th>
+              <th class="px-4 py-2.5 text-left">이름</th>
+              <th class="px-4 py-2.5 text-left w-20">Method</th>
+              <th class="px-4 py-2.5 text-left">URL</th>
+              <th class="px-4 py-2.5 text-center w-16">Weight</th>
+              <th class="px-4 py-2.5 text-center w-20">Expected</th>
+            </tr>
+          </thead>
+          <tbody id="api-preview" class="divide-y divide-slate-50">
+          </tbody>
+        </table>
+      </div>
     </div>
 
   </main>
 
   <script>
-    // 서버에서 주입된 초기 데이터
-    let apis = {{.APIsJSON}};
+    const FIXED_APIS = [
+      { name: 'user 생성',    method: 'POST', path: '/v1/user',     weight: 3, expected: 201 },
+      { name: 'user 조회',    method: 'GET',  path: '/v1/user',     weight: 3, expected: 200 },
+      { name: 'product 생성', method: 'POST', path: '/v1/product',  weight: 3, expected: 201 },
+      { name: 'product 조회', method: 'GET',  path: '/v1/product',  weight: 3, expected: 200 },
+      { name: 'stress',       method: 'POST', path: '/v1/stress',   weight: 2, expected: 201 },
+      { name: 'healthcheck',  method: 'GET',  path: '/healthcheck', weight: 1, expected: 200 },
+    ];
 
-    function defaultEntry() {
-      return {
-        name: '',
-        url: '',
-        method: 'POST',
-        weight: 1,
-        expectedStatus: 200,
-        headers: {},
-        body: {},
-        params: {},
-        _bodyMode: 'body',
-        _headerPairs: [],
-        _bodyText: '{}',
-        _paramPairs: [],
-      };
+    const METHOD_COLORS = {
+      'GET':    'bg-emerald-100 text-emerald-700',
+      'POST':   'bg-blue-100 text-blue-700',
+      'PUT':    'bg-amber-100 text-amber-700',
+      'DELETE': 'bg-red-100 text-red-700',
+    };
+
+    function updatePreview() {
+      const base = (document.getElementById('endpoint-input').value || '').replace(/\/+$/, '');
+      const tbody = document.getElementById('api-preview');
+      tbody.innerHTML = FIXED_APIS.map((api, i) => `
+        <tr class="hover:bg-slate-50 transition">
+          <td class="px-4 py-3 text-xs text-slate-400">${i + 1}</td>
+          <td class="px-4 py-3 text-xs font-medium text-slate-700">${api.name}</td>
+          <td class="px-4 py-3">
+            <span class="px-1.5 py-0.5 text-xs font-bold rounded ${METHOD_COLORS[api.method] || 'bg-slate-100 text-slate-700'}">
+              ${api.method}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-xs font-mono">
+            ${base
+              ? `<span class="text-slate-400">${esc(base)}</span><span class="text-indigo-600 font-semibold">${api.path}</span>`
+              : `<span class="text-indigo-600 font-semibold">${api.path}</span>`
+            }
+          </td>
+          <td class="px-4 py-3 text-xs text-center text-slate-500">${api.weight}</td>
+          <td class="px-4 py-3 text-xs text-center">
+            <span class="px-1.5 py-0.5 rounded font-medium
+              ${api.expected >= 200 && api.expected < 300 ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}">
+              ${api.expected}
+            </span>
+          </td>
+        </tr>
+      `).join('');
     }
 
-    function renderAPIs() {
-      const list = document.getElementById('api-list');
-      list.innerHTML = '';
-      apis.forEach((api, i) => renderEntry(list, api, i));
-    }
-
-    function renderEntry(container, api, i) {
-      const headerPairs = api._headerPairs || Object.entries(api.headers || {}).map(([k,v]) => ({k, v}));
-      const bodyMode = api._bodyMode || (Object.keys(api.params || {}).length > 0 ? 'params' : 'body');
-      const bodyText = api._bodyText || (api.body ? JSON.stringify(api.body, null, 2) : '{}');
-      const paramPairs = api._paramPairs || Object.entries(api.params || {}).map(([k,v]) => ({k, v: String(v)}));
-
-      const card = document.createElement('div');
-      card.className = 'bg-white rounded-xl shadow-sm border border-slate-200 p-5';
-      card.dataset.index = i;
-
-      card.innerHTML = `
-        <!-- 카드 헤더 -->
-        <div class="flex items-center justify-between mb-4">
-          <span class="text-sm font-semibold text-slate-600">API #${i + 1}</span>
-          <button onclick="removeEntry(${i})"
-            class="text-slate-300 hover:text-red-400 transition p-1 rounded">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-
-        <!-- Row 1: Name / Method / Weight -->
-        <div class="grid grid-cols-12 gap-3 mb-3">
-          <div class="col-span-5">
-            <label class="block text-xs font-medium text-slate-500 mb-1">이름 (선택)</label>
-            <input type="text" placeholder="예: 상품 등록" value="${esc(api.name || '')}"
-              oninput="updateField(${i}, 'name', this.value)"
-              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
-          </div>
-          <div class="col-span-4">
-            <label class="block text-xs font-medium text-slate-500 mb-1">Method</label>
-            <select onchange="updateField(${i}, 'method', this.value)"
-              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white">
-              ${['GET','POST','PUT','PATCH','DELETE'].map(m =>
-                `<option value="${m}" ${api.method === m ? 'selected' : ''}>${m}</option>`
-              ).join('')}
-            </select>
-          </div>
-          <div class="col-span-3">
-            <label class="block text-xs font-medium text-slate-500 mb-1">Weight</label>
-            <input type="number" min="1" value="${api.weight || 1}"
-              oninput="updateField(${i}, 'weight', parseInt(this.value)||1)"
-              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
-          </div>
-        </div>
-
-        <!-- Row 2: URL -->
-        <div class="grid grid-cols-12 gap-3 mb-3">
-          <div class="col-span-9">
-            <label class="block text-xs font-medium text-slate-500 mb-1">URL <span class="text-red-400">*</span></label>
-            <input type="url" placeholder="https://api.example.com/v1/product" value="${esc(api.url || '')}"
-              oninput="updateField(${i}, 'url', this.value)"
-              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
-          </div>
-          <div class="col-span-3">
-            <label class="block text-xs font-medium text-slate-500 mb-1">Expected Status</label>
-            <input type="number" value="${api.expectedStatus || 200}"
-              oninput="updateField(${i}, 'expectedStatus', parseInt(this.value)||200)"
-              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
-          </div>
-        </div>
-
-        <!-- Headers -->
-        <div class="mb-3">
-          <div class="flex items-center justify-between mb-1">
-            <label class="text-xs font-medium text-slate-500">Headers</label>
-            <button onclick="addHeader(${i})"
-              class="text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ 추가</button>
-          </div>
-          <div id="headers-${i}" class="space-y-2">
-            ${headerPairs.map((h, hi) => headerRow(i, hi, h.k, h.v)).join('')}
-          </div>
-        </div>
-
-        <!-- Body / Params 탭 -->
-        <div>
-          <div class="flex gap-1 mb-2">
-            <button onclick="setBodyMode(${i}, 'body')"
-              id="tab-body-${i}"
-              class="px-3 py-1 text-xs font-medium rounded-md transition ${bodyMode === 'body' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}">
-              Body (JSON)
-            </button>
-            <button onclick="setBodyMode(${i}, 'params')"
-              id="tab-params-${i}"
-              class="px-3 py-1 text-xs font-medium rounded-md transition ${bodyMode === 'params' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}">
-              Params (Query)
-            </button>
-          </div>
-
-          <div id="body-panel-${i}" class="${bodyMode === 'body' ? '' : 'hidden'}">
-            <textarea rows="4" placeholder='{"key": "value"}'
-              oninput="updateBodyText(${i}, this.value)"
-              class="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono resize-y"
-            >${esc(bodyText)}</textarea>
-          </div>
-
-          <div id="params-panel-${i}" class="${bodyMode === 'params' ? '' : 'hidden'}">
-            <div id="params-${i}" class="space-y-2">
-              ${paramPairs.map((p, pi) => paramRow(i, pi, p.k, p.v)).join('')}
-            </div>
-            <button onclick="addParam(${i})"
-              class="mt-2 text-xs text-indigo-600 hover:text-indigo-800 font-medium">+ 파라미터 추가</button>
-          </div>
-        </div>
-      `;
-
-      container.appendChild(card);
-
-      // 내부 상태 저장
-      apis[i]._headerPairs = headerPairs;
-      apis[i]._bodyMode = bodyMode;
-      apis[i]._bodyText = bodyText;
-      apis[i]._paramPairs = paramPairs;
-    }
-
-    function headerRow(i, hi, k, v) {
-      return `<div class="flex gap-2" id="header-row-${i}-${hi}">
-        <input type="text" placeholder="Key" value="${esc(k)}"
-          oninput="updateHeader(${i}, ${hi}, 'k', this.value)"
-          class="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
-        <input type="text" placeholder="Value" value="${esc(v)}"
-          oninput="updateHeader(${i}, ${hi}, 'v', this.value)"
-          class="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
-        <button onclick="removeHeader(${i}, ${hi})"
-          class="text-slate-300 hover:text-red-400 px-1">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>`;
-    }
-
-    function paramRow(i, pi, k, v) {
-      return `<div class="flex gap-2" id="param-row-${i}-${pi}">
-        <input type="text" placeholder="Key" value="${esc(k)}"
-          oninput="updateParam(${i}, ${pi}, 'k', this.value)"
-          class="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
-        <input type="text" placeholder="Value" value="${esc(v)}"
-          oninput="updateParam(${i}, ${pi}, 'v', this.value)"
-          class="flex-1 px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-400"/>
-        <button onclick="removeParam(${i}, ${pi})"
-          class="text-slate-300 hover:text-red-400 px-1">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>`;
-    }
-
-    // ─── 상태 업데이트 함수들 ───────────────────────────────────────
-
-    function updateField(i, field, value) { apis[i][field] = value; }
-
-    function setBodyMode(i, mode) {
-      apis[i]._bodyMode = mode;
-      document.getElementById(`body-panel-${i}`).classList.toggle('hidden', mode !== 'body');
-      document.getElementById(`params-panel-${i}`).classList.toggle('hidden', mode !== 'params');
-      const tabBody = document.getElementById(`tab-body-${i}`);
-      const tabParams = document.getElementById(`tab-params-${i}`);
-      if (mode === 'body') {
-        tabBody.className = tabBody.className.replace('text-slate-500 hover:bg-slate-100', 'bg-indigo-600 text-white');
-        tabParams.className = tabParams.className.replace('bg-indigo-600 text-white', 'text-slate-500 hover:bg-slate-100');
-      } else {
-        tabParams.className = tabParams.className.replace('text-slate-500 hover:bg-slate-100', 'bg-indigo-600 text-white');
-        tabBody.className = tabBody.className.replace('bg-indigo-600 text-white', 'text-slate-500 hover:bg-slate-100');
-      }
-    }
-
-    function updateBodyText(i, text) { apis[i]._bodyText = text; }
-
-    function addHeader(i) {
-      apis[i]._headerPairs = apis[i]._headerPairs || [];
-      apis[i]._headerPairs.push({k:'', v:''});
-      const hi = apis[i]._headerPairs.length - 1;
-      document.getElementById(`headers-${i}`).insertAdjacentHTML('beforeend', headerRow(i, hi, '', ''));
-    }
-
-    function updateHeader(i, hi, field, value) {
-      if (!apis[i]._headerPairs) apis[i]._headerPairs = [];
-      if (!apis[i]._headerPairs[hi]) apis[i]._headerPairs[hi] = {k:'', v:''};
-      apis[i]._headerPairs[hi][field] = value;
-    }
-
-    function removeHeader(i, hi) {
-      apis[i]._headerPairs.splice(hi, 1);
-      renderAPIs();
-    }
-
-    function addParam(i) {
-      apis[i]._paramPairs = apis[i]._paramPairs || [];
-      apis[i]._paramPairs.push({k:'', v:''});
-      const pi = apis[i]._paramPairs.length - 1;
-      document.getElementById(`params-${i}`).insertAdjacentHTML('beforeend', paramRow(i, pi, '', ''));
-    }
-
-    function updateParam(i, pi, field, value) {
-      if (!apis[i]._paramPairs) apis[i]._paramPairs = [];
-      if (!apis[i]._paramPairs[pi]) apis[i]._paramPairs[pi] = {k:'', v:''};
-      apis[i]._paramPairs[pi][field] = value;
-    }
-
-    function removeParam(i, pi) {
-      apis[i]._paramPairs.splice(pi, 1);
-      renderAPIs();
-    }
-
-    function addEntry() {
-      apis.push(defaultEntry());
-      renderAPIs();
-      // 새 카드로 스크롤
-      const cards = document.querySelectorAll('#api-list > div');
-      cards[cards.length - 1]?.scrollIntoView({behavior: 'smooth', block: 'start'});
-    }
-
-    function removeEntry(i) {
-      apis.splice(i, 1);
-      renderAPIs();
-    }
-
-    // ─── 저장 ───────────────────────────────────────────────────────
-
-    function collectAPIs() {
-      return apis.map(api => {
-        const entry = {
-          name: api.name || '',
-          url: api.url || '',
-          method: api.method || 'GET',
-          weight: api.weight || 1,
-          expectedStatus: api.expectedStatus || 200,
-        };
-
-        // Headers
-        const headers = {};
-        (api._headerPairs || []).forEach(({k, v}) => { if (k) headers[k] = v; });
-        if (Object.keys(headers).length > 0) entry.headers = headers;
-
-        // Body 또는 Params
-        if (api._bodyMode === 'params') {
-          const params = {};
-          (api._paramPairs || []).forEach(({k, v}) => { if (k) params[k] = v; });
-          if (Object.keys(params).length > 0) entry.params = params;
-        } else {
-          try {
-            const body = JSON.parse(api._bodyText || '{}');
-            if (Object.keys(body).length > 0) entry.body = body;
-          } catch (e) {
-            throw new Error(`API #${apis.indexOf(api) + 1}의 Body JSON이 유효하지 않습니다: ${e.message}`);
-          }
-        }
-
-        return entry;
-      });
-    }
-
-    async function saveAPIs() {
-      let payload;
-      try {
-        payload = collectAPIs();
-      } catch (e) {
-        showToast(e.message, false);
+    async function saveEndpoint() {
+      const endpoint = document.getElementById('endpoint-input').value.trim();
+      if (!endpoint) {
+        showToast('❌ URL을 입력해주세요', false);
         return;
       }
-
       try {
-        const res = await fetch('/api/apis', {
+        const res = await fetch('/api/endpoint', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ endpoint }),
         });
         if (res.ok) {
-          showToast('✅ 설정이 저장되었습니다!', true);
+          showToast('✅ 엔드포인트가 저장되었습니다!', true);
         } else {
           const text = await res.text();
           showToast('❌ 저장 실패: ' + text, false);
@@ -399,16 +185,8 @@
         .replace(/>/g, '&gt;');
     }
 
-    // 초기화
-    // 기존 데이터에 내부 필드 추가
-    apis = apis.map(api => ({
-      ...api,
-      _bodyMode: api.params && Object.keys(api.params).length > 0 ? 'params' : 'body',
-      _bodyText: api.body ? JSON.stringify(api.body, null, 2) : '{}',
-      _headerPairs: Object.entries(api.headers || {}).map(([k,v]) => ({k, v})),
-      _paramPairs: Object.entries(api.params || {}).map(([k,v]) => ({k, v: String(v)})),
-    }));
-    renderAPIs();
+    // 초기화: 저장된 엔드포인트로 프리뷰 채우기
+    updatePreview();
   </script>
 
 </body>

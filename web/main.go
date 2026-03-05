@@ -77,8 +77,8 @@ func main() {
 
 	// 사용자 라우트 (user 이상)
 	mux.HandleFunc("GET /user", requireRole("user", showUserPage))
-	mux.HandleFunc("GET /api/apis", requireRole("user", getAPIs))
-	mux.HandleFunc("POST /api/apis", requireRole("user", saveAPIs))
+	mux.HandleFunc("GET /api/endpoint", requireRole("user", getEndpoint))
+	mux.HandleFunc("POST /api/endpoint", requireRole("user", saveEndpoint))
 
 	// 어드민 라우트
 	mux.HandleFunc("GET /admin", requireRole("admin", showAdminPage))
@@ -112,23 +112,20 @@ func showLogin(w http.ResponseWriter, r *http.Request) {
 func showUserPage(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFromContext(r.Context())
 
-	// apis.json 로드
-	var entries []APIEntry
+	// 현재 설정된 엔드포인트 추출
+	endpoint := ""
 	data, err := os.ReadFile(apisFilePath())
-	if err == nil {
-		_ = json.Unmarshal(data, &entries)
+	if err == nil && len(data) > 0 {
+		var entries []APIEntry
+		if json.Unmarshal(data, &entries) == nil && len(entries) > 0 {
+			endpoint = extractEndpoint(entries[0].URL)
+		}
 	}
-	if entries == nil {
-		entries = []APIEntry{}
-	}
-
-	// JSON 직렬화 (JS에 주입)
-	apisJSON, _ := json.Marshal(entries)
 
 	renderTemplate(w, "user.html", map[string]any{
 		"Username": sess.Username,
 		"Role":     sess.Role,
-		"APIsJSON": template.JS(apisJSON), // XSS 안전 (encoding/json 출력)
+		"Endpoint": endpoint,
 	})
 }
 
@@ -142,10 +139,17 @@ func showAdminPage(w http.ResponseWriter, r *http.Request) {
 		_ = json.Unmarshal(data, &entries)
 	}
 
+	// 엔드포인트 추출
+	endpoint := ""
+	if len(entries) > 0 {
+		endpoint = extractEndpoint(entries[0].URL)
+	}
+
 	renderTemplate(w, "admin.html", map[string]any{
 		"Username": sess.Username,
 		"APIs":     entries,
 		"Config":   globalStore.GetTestConfig(),
+		"Endpoint": endpoint,
 	})
 }
 
