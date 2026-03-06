@@ -221,9 +221,10 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// p90 응답시간 (최근 5분): 성공 요청(2xx)만 기준
+		// p90 응답시간 (최근 5분): 전체 요청 기준 (2xx 필터 없음 - 실제 부하 반영)
+		// 2xx 필터 적용 시 느리게 실패하는 5xx 요청이 제외되어 p90이 비현실적으로 낮게 나옴
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT PERCENTILE("value",90) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "status" =~ /^2/ AND time > now() - 5m`,
+			`SELECT PERCENTILE("value",90) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
