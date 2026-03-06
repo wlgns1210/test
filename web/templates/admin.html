@@ -328,6 +328,7 @@
     async function startTest() {
       const res = await fetch('/api/test/start', {method: 'POST'});
       if (res.ok) {
+        appendLog('🚀 테스트 시작 요청됨. Docker 서비스 준비까지 최대 1분 소요될 수 있습니다...', 'info');
         updateStatus('running');
         connectLogs();
       } else {
@@ -399,7 +400,9 @@
       }
 
       evtSource = new EventSource('/api/test/logs');
-      setSSEIndicator(true);
+
+      // onopen: 실제 연결이 수립됐을 때만 indicator 켜기
+      evtSource.onopen = () => setSSEIndicator(true);
 
       evtSource.onmessage = (e) => {
         if (e.data === '__DONE__') {
@@ -413,8 +416,10 @@
 
       evtSource.onerror = () => {
         setSSEIndicator(false);
-        evtSource.close();
-        evtSource = null;
+        if (evtSource) {
+          evtSource.close();
+          evtSource = null;
+        }
         // 실행 중이면 3초 후 재연결
         if (testStatus === 'running') {
           setTimeout(connectLogs, 3000);
@@ -446,7 +451,9 @@
 
       // 컬러 코딩
       const lower = line.toLowerCase();
-      if (type === 'error' || lower.includes('error') || lower.includes('❌') || lower.includes('failed')) {
+      if (type === 'info') {
+        div.classList.add('text-cyan-400');
+      } else if (type === 'error' || lower.includes('error') || lower.includes('❌') || lower.includes('failed')) {
         div.classList.add('text-red-400');
       } else if (lower.includes('warn') || lower.includes('⚠')) {
         div.classList.add('text-yellow-400');
@@ -548,7 +555,7 @@
 
         <!-- API별 SLO 카드 -->
         <div class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">
-          API별 SLO 달성률 — 최근 1분 p95 기준
+          API별 SLO 달성률 — 최근 5분 p95 기준
         </div>
         <div class="space-y-2">
           ${(data.apis || []).map(renderAPICard).join('')}

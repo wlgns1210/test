@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 )
 
 // getTestConfig는 GET /api/test/config를 처리합니다.
@@ -171,6 +172,18 @@ func streamLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
+	// 테스트가 이미 종료된 상태라면 __DONE__ 즉시 전송하고 닫기
+	// (테스트 종료 후 페이지를 새로 고침하거나 뒤늦게 연결한 경우)
+	if globalStore.GetTestStatus() != StatusRunning {
+		fmt.Fprintf(w, "data: __DONE__\n\n")
+		flusher.Flush()
+		return
+	}
+
+	// 15초마다 keepalive 전송: 프록시/로드밸런서 타임아웃 방지
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
 	// 실시간 스트리밍
 	for {
 		select {
@@ -184,6 +197,10 @@ func streamLogs(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			fmt.Fprintf(w, "data: %s\n\n", line)
+			flusher.Flush()
+		case <-ticker.C:
+			// SSE keepalive comment (클라이언트에서 무시됨)
+			fmt.Fprintf(w, ": keepalive\n\n")
 			flusher.Flush()
 		case <-r.Context().Done():
 			return

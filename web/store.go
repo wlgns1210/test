@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -134,6 +135,11 @@ func (s *AppStore) SetTestConfig(cfg TestConfig) {
 func (s *AppStore) AddLogLine(line string) {
 	// ANSI 이스케이프 코드 제거
 	line = ansiRe.ReplaceAllString(line, "")
+	// \r 제거: k6 progress 표시는 \r로 덮어씀 → 마지막 세그먼트만 사용
+	if idx := strings.LastIndex(line, "\r"); idx >= 0 {
+		line = line[idx+1:]
+	}
+	line = strings.TrimRight(line, " \t")
 	if line == "" {
 		return
 	}

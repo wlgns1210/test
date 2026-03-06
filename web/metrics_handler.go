@@ -108,13 +108,15 @@ func firstFloat(m map[string]any) (float64, bool) {
 //	stress       : p95 ≤ 1000ms
 var sloTargets = []struct {
 	name    string
-	urlFrag string // target_url 태그에서 매칭할 URL 조각
+	urlFrag string // target_url 태그에서 매칭할 URL 조각 (InfluxQL 정규식용: / → \/)
 	path    string // 표시용 경로
 	sloMs   int    // SLO 임계값 (ms)
 }{
-	{"user",    "v1/user",    "/v1/user",    200},
-	{"product", "v1/product", "/v1/product", 200},
-	{"stress",  "v1/stress",  "/v1/stress",  1000},
+	// InfluxQL 정규식에서 '/'는 구분자이므로 '\/'로 이스케이프 필요
+	// "v1\\/user" → Go 문자열 v1\/user → InfluxQL 정규식 /v1\/user/
+	{"user",    "v1\\/user",    "/v1/user",    200},
+	{"product", "v1\\/product", "/v1/product", 200},
+	{"stress",  "v1\\/stress",  "/v1/stress",  1000},
 }
 
 // ── 핸들러 ───────────────────────────────────────────────────────
@@ -176,9 +178,9 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			SuccessRate:    -1,
 		}
 
-		// p95 응답시간 (최근 1분)
+		// p95 응답시간 (최근 5분: 테스트 종료 후에도 결과 유지)
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT PERCENTILE("value",95) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 1m`,
+			`SELECT PERCENTILE("value",95) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
@@ -187,9 +189,9 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// p99 응답시간 (최근 1분)
+		// p99 응답시간 (최근 5분)
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT PERCENTILE("value",99) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 1m`,
+			`SELECT PERCENTILE("value",99) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
@@ -197,9 +199,9 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 최근 1분 요청 수
+		// 최근 5분 요청 수
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 1m`,
+			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
@@ -207,9 +209,9 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// API별 성공률 (최근 1분)
+		// API별 성공률 (최근 5분)
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT MEAN("value") FROM "http_req_failed" WHERE "target_url" =~ /%s/ AND time > now() - 1m`,
+			`SELECT MEAN("value") FROM "http_req_failed" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
