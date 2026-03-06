@@ -180,7 +180,7 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			P90Ms:          -1,
 		}
 
-		// 전체 요청수 (최근 5분)
+		// 전체 요청수 (최근 5분): 성공/실패 모두 포함
 		if res, err := influxQuery(fmt.Sprintf(
 			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
@@ -190,44 +190,40 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// 성공 요청수 (최근 5분): http_req_failed MEAN → 실패율 역산
+		// 성공 요청수 (최근 5분): status =~ /^2/ → 2xx 응답만 카운트
+		// MEAN(http_req_failed) 역산 방식은 실패 요청이 빠른 경우 오차 발생
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT MEAN("value") FROM "http_req_failed" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
+			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "status" =~ /^2/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
-				// 처리율 = (1 - 실패율) × 100
-				m.Throughput = (1 - v) * 100
-				m.SuccessReqs = int64(float64(m.TotalReqs) * (1 - v))
+				m.SuccessReqs = int64(v)
 				successAll += m.SuccessReqs
+				if m.TotalReqs > 0 {
+					m.Throughput = float64(m.SuccessReqs) / float64(m.TotalReqs) * 100
+				}
 			}
 		}
 
-		// SLO 이내 요청수 (최근 5분): 응답시간 ≤ SLO threshold
-		// ※ 실패 요청도 빠르게 응답하면 포함될 수 있으므로 성공 요청수로 상한 처리
+		// SLO 이내 성공 요청수 (최근 5분): 2xx 응답 AND 응답시간 ≤ SLO threshold
+		// status =~ /^2/ 필터로 실패 요청(4xx/5xx)이 빠르게 응답해도 제외
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "value" <= %d AND time > now() - 5m`,
+			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "status" =~ /^2/ AND "value" <= %d AND time > now() - 5m`,
 			t.urlFrag, t.sloMs,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
-				rawWithin := int64(v)
-				// 성공한 요청수를 초과할 수 없음 (빠른 실패 요청이 포함되는 경우 보정)
-				if m.SuccessReqs > 0 && rawWithin > m.SuccessReqs {
-					rawWithin = m.SuccessReqs
-				}
-				m.WithinSLOReqs = rawWithin
+				m.WithinSLOReqs = int64(v)
 				withinAll += m.WithinSLOReqs
 				// 효율성 = 성공한 요청 중 SLO 이내 비율
-				// = (성공 AND SLO이내) / 성공 요청수 × 100
 				if m.SuccessReqs > 0 {
 					m.Efficiency = float64(m.WithinSLOReqs) / float64(m.SuccessReqs) * 100
 				}
 			}
 		}
 
-		// p90 응답시간 (최근 5분, 참고용)
+		// p90 응답시간 (최근 5분): 성공 요청(2xx)만 기준
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT PERCENTILE("value",90) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
+			`SELECT PERCENTILE("value",90) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "status" =~ /^2/ AND time > now() - 5m`,
 			t.urlFrag,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
