@@ -591,9 +591,9 @@
       const efPct   = api.efficiency >= 0 ? api.efficiency : 0;
       const tpPct   = api.throughput >= 0 ? api.throughput : 0;
 
-      const p95Text = api.p95Ms >= 0 ? api.p95Ms.toFixed(0) + 'ms' : 'N/A';
-      const p95Clr  = api.p95Ms < 0               ? 'text-slate-400'
-                    : api.p95Ms <= api.sloThresholdMs ? 'text-emerald-600'
+      const p90Text = api.p90Ms >= 0 ? api.p90Ms.toFixed(0) + 'ms' : 'N/A';
+      const p90Clr  = api.p90Ms < 0               ? 'text-slate-400'
+                    : api.p90Ms <= api.sloThresholdMs ? 'text-emerald-600'
                     : 'text-red-600';
 
       return `
@@ -607,7 +607,7 @@
             <div class="flex items-center gap-2 text-xs text-slate-400">
               <span>SLO ≤ ${api.sloThresholdMs}ms</span>
               <span class="text-slate-300">|</span>
-              <span>p95: <span class="font-semibold ${p95Clr}">${p95Text}</span></span>
+              <span>p90: <span class="font-semibold ${p90Clr}">${p90Text}</span></span>
               <span class="text-slate-300">|</span>
               <span>${fmtNum(api.totalReqs)} req</span>
             </div>
