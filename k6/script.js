@@ -253,13 +253,17 @@ function sendRequest(cfg) {
     }
   }
 
+  // name 태그를 base URL(쿼리 파라미터 제외)로 고정
+  // → InfluxDB "max-values-per-tag" 한도 초과 방지 (요청마다 쿼리파라미터가 달라 카디널리티 폭증)
+  const tagOpts = { target_url: cfg.url, method, name: cfg.url };
+
   let res;
   switch (method) {
-    case 'GET':    res = http.get(url,          { headers, tags: { target_url: cfg.url, method } }); break;
-    case 'POST':   res = http.post(url,   body, { headers, tags: { target_url: cfg.url, method } }); break;
-    case 'PUT':    res = http.put(url,    body, { headers, tags: { target_url: cfg.url, method } }); break;
-    case 'PATCH':  res = http.patch(url,  body, { headers, tags: { target_url: cfg.url, method } }); break;
-    case 'DELETE': res = http.del(url,    body, { headers, tags: { target_url: cfg.url, method } }); break;
+    case 'GET':    res = http.get(url,          { headers, tags: tagOpts }); break;
+    case 'POST':   res = http.post(url,   body, { headers, tags: tagOpts }); break;
+    case 'PUT':    res = http.put(url,    body, { headers, tags: tagOpts }); break;
+    case 'PATCH':  res = http.patch(url,  body, { headers, tags: tagOpts }); break;
+    case 'DELETE': res = http.del(url,    body, { headers, tags: tagOpts }); break;
     default:
       console.error(`[ERROR] 지원하지 않는 HTTP 메서드: ${method}`);
       return;
