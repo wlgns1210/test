@@ -558,7 +558,7 @@
             <div class="text-3xl font-extrabold ${ef.text} leading-none mb-1">
               ${fmtRate(data.globalEfficiency)}
             </div>
-            <div class="text-xs text-slate-400">SLO 이내 / 전체 요청</div>
+            <div class="text-xs text-slate-400">SLO 이내 / 성공 요청</div>
           </div>
 
           <!-- RPS + 총 요청 -->
@@ -642,7 +642,7 @@
                      style="width:${efPct.toFixed(1)}%"></div>
               </div>
               <div class="text-xs text-slate-400 mt-0.5">
-                ${hasData ? fmtNum(api.withinSLOReqs) + ' / ' + fmtNum(api.totalReqs) + ' SLO 이내' : '데이터 없음'}
+                ${hasData ? fmtNum(api.withinSLOReqs) + ' / ' + fmtNum(api.successReqs) + ' SLO 이내' : '데이터 없음'}
               </div>
             </div>
           </div>

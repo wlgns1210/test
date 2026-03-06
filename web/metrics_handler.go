@@ -169,7 +169,7 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── API별 지표 ─────────────────────────────────────────────
-	var totalAll, withinAll int64
+	var successAll, withinAll int64
 	for _, t := range sloTargets {
 		m := APIMetric{
 			Name:           t.name,
@@ -187,7 +187,6 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
 				m.TotalReqs = int64(v)
-				totalAll += m.TotalReqs
 			}
 		}
 
@@ -200,6 +199,7 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 				// 처리율 = (1 - 실패율) × 100
 				m.Throughput = (1 - v) * 100
 				m.SuccessReqs = int64(float64(m.TotalReqs) * (1 - v))
+				successAll += m.SuccessReqs
 			}
 		}
 
@@ -211,15 +211,16 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
 				rawWithin := int64(v)
-				// 효율성은 처리율(성공)을 초과할 수 없음: min(SLO이내, 성공요청수)
+				// 성공한 요청수를 초과할 수 없음 (빠른 실패 요청이 포함되는 경우 보정)
 				if m.SuccessReqs > 0 && rawWithin > m.SuccessReqs {
 					rawWithin = m.SuccessReqs
 				}
 				m.WithinSLOReqs = rawWithin
 				withinAll += m.WithinSLOReqs
-				if m.TotalReqs > 0 {
-					// 효율성 = 성공 기준 SLO이내 요청수 / 전체 요청수 × 100
-					m.Efficiency = float64(m.WithinSLOReqs) / float64(m.TotalReqs) * 100
+				// 효율성 = 성공한 요청 중 SLO 이내 비율
+				// = (성공 AND SLO이내) / 성공 요청수 × 100
+				if m.SuccessReqs > 0 {
+					m.Efficiency = float64(m.WithinSLOReqs) / float64(m.SuccessReqs) * 100
 				}
 			}
 		}
@@ -237,9 +238,10 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 		payload.APIs = append(payload.APIs, m)
 	}
 
-	// ── 전체 효율성 = 전체 SLO이내 / 전체 요청수 ──────────────
-	if totalAll > 0 {
-		payload.GlobalEfficiency = float64(withinAll) / float64(totalAll) * 100
+	// ── 전체 효율성 = 전체 SLO이내 / 전체 성공 요청수 ──────────
+	// 효율성: 성공한 요청 중 SLO 기준을 만족한 비율
+	if successAll > 0 {
+		payload.GlobalEfficiency = float64(withinAll) / float64(successAll) * 100
 	}
 
 	json.NewEncoder(w).Encode(payload)
