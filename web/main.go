@@ -119,6 +119,7 @@ func main() {
 	mux.HandleFunc("POST /api/test/stop", requireRole("admin", stopTest))
 	mux.HandleFunc("GET /api/test/status", requireRole("admin", getTestStatus))
 	mux.HandleFunc("GET /api/test/logs", requireRole("admin", streamLogs))
+	mux.HandleFunc("GET /api/metrics", requireRole("admin", getMetrics))
 
 	port := os.Getenv("LOADTEST_PORT")
 	if port == "" {

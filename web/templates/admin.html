@@ -232,6 +232,26 @@
           <div id="config-toast" class="hidden mt-3 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 text-center font-medium"></div>
         </div>
 
+        <!-- 처리율 & 효율성 모니터링 -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h3 class="font-semibold text-slate-700 text-sm">처리율 &amp; 효율성 모니터링</h3>
+              <p class="text-xs text-slate-400 mt-0.5">InfluxDB 실시간 데이터 · 5초마다 갱신</p>
+            </div>
+            <div id="metrics-badge" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-400">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-300" id="metrics-dot"></span>
+              <span id="metrics-badge-text">연결 중...</span>
+            </div>
+          </div>
+          <div id="metrics-panel">
+            <div class="text-center py-8 text-slate-400 text-sm">
+              <div class="text-3xl mb-2">📡</div>
+              InfluxDB 연결 확인 중...
+            </div>
+          </div>
+        </div>
+
         <!-- 로그 패널 -->
         <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
           <div class="flex items-center justify-between px-5 py-3 border-b border-slate-200">
@@ -458,6 +478,143 @@
 
     // 페이지 로드 시 로그 연결 (기존 로그 히스토리 받기)
     connectLogs();
+
+    // ─── 처리율 & 효율성 모니터링 ─────────────────────────────
+    async function fetchMetrics() {
+      try {
+        const res = await fetch('/api/metrics');
+        const data = await res.json();
+        renderMetrics(data);
+      } catch(e) { /* silent */ }
+    }
+
+    function setMetricsBadge(available) {
+      const badge = document.getElementById('metrics-badge');
+      const dot   = document.getElementById('metrics-dot');
+      const text  = document.getElementById('metrics-badge-text');
+      if (available) {
+        badge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700';
+        dot.className   = 'w-1.5 h-1.5 rounded-full bg-emerald-500 pulse-dot';
+        text.textContent = '연결됨';
+      } else {
+        badge.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600';
+        dot.className   = 'w-1.5 h-1.5 rounded-full bg-red-400';
+        text.textContent = '미연결';
+      }
+    }
+
+    function renderMetrics(data) {
+      const panel = document.getElementById('metrics-panel');
+      setMetricsBadge(data.available);
+
+      if (!data.available) {
+        panel.innerHTML = `
+          <div class="text-center py-6 text-slate-400 text-sm">
+            <div class="text-3xl mb-2">📡</div>
+            InfluxDB에 연결할 수 없습니다<br>
+            <span class="text-xs">docker compose가 실행 중인지 확인하세요</span>
+          </div>`;
+        return;
+      }
+
+      const srClass = data.successRate < 0  ? 'text-slate-500'
+                    : data.successRate >= 99 ? 'text-emerald-600'
+                    : data.successRate >= 95 ? 'text-amber-600'
+                    : 'text-red-600';
+      const srBg    = data.successRate < 0  ? 'bg-slate-50'
+                    : data.successRate >= 99 ? 'bg-emerald-50'
+                    : data.successRate >= 95 ? 'bg-amber-50'
+                    : 'bg-red-50';
+      const srText  = data.successRate >= 0 ? data.successRate.toFixed(1) + '%' : 'N/A';
+
+      panel.innerHTML = `
+        <!-- 전체 현황 통계 -->
+        <div class="grid grid-cols-3 gap-3 mb-4">
+          <div class="bg-slate-50 rounded-xl p-3 text-center">
+            <div class="text-xs text-slate-400 mb-1">총 요청수 (1h)</div>
+            <div class="text-xl font-bold text-slate-800">${fmtNum(data.totalReqs)}</div>
+          </div>
+          <div class="bg-slate-50 rounded-xl p-3 text-center">
+            <div class="text-xs text-slate-400 mb-1">현재 RPS</div>
+            <div class="text-xl font-bold text-slate-800">
+              ${data.currentRps.toFixed(1)}<span class="text-xs font-normal text-slate-400"> /s</span>
+            </div>
+          </div>
+          <div class="${srBg} rounded-xl p-3 text-center">
+            <div class="text-xs text-slate-400 mb-1">전체 성공률 (1m)</div>
+            <div class="text-xl font-bold ${srClass}">${srText}</div>
+          </div>
+        </div>
+
+        <!-- API별 SLO 카드 -->
+        <div class="text-xs font-semibold text-slate-500 mb-2 uppercase tracking-wide">
+          API별 SLO 달성률 — 최근 1분 p95 기준
+        </div>
+        <div class="space-y-2">
+          ${(data.apis || []).map(renderAPICard).join('')}
+        </div>
+        <div class="mt-3 text-right text-xs text-slate-400">마지막 갱신: ${data.updatedAt}</div>
+      `;
+    }
+
+    function renderAPICard(api) {
+      const hasData = api.p95Ms >= 0;
+      const sloMet  = hasData && api.p95Ms <= api.sloThresholdMs;
+      const pct     = hasData ? Math.min(100, api.p95Ms / api.sloThresholdMs * 100) : 0;
+      const barClr  = !hasData ? 'bg-slate-200'
+                    : pct <= 60 ? 'bg-emerald-400'
+                    : pct <= 90 ? 'bg-amber-400'
+                    : 'bg-red-500';
+
+      const icon    = !hasData ? '⚪' : sloMet ? '✅' : '❌';
+      const p95Text = hasData ? api.p95Ms.toFixed(0) + 'ms' : 'N/A';
+      const p99Text = api.p99Ms >= 0 ? api.p99Ms.toFixed(0) + 'ms' : 'N/A';
+      const p95Clr  = !hasData         ? 'text-slate-400'
+                    : sloMet           ? 'text-emerald-600'
+                    : 'text-red-600';
+      const srText  = api.successRate >= 0 ? api.successRate.toFixed(1) + '%' : 'N/A';
+      const srClr   = api.successRate < 0   ? 'text-slate-400'
+                    : api.successRate >= 95  ? 'text-emerald-600'
+                    : 'text-red-600';
+
+      return `
+        <div class="border border-slate-100 rounded-xl p-3">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <span>${icon}</span>
+              <span class="text-sm font-semibold text-slate-700">${api.name}</span>
+              <span class="text-xs font-mono text-slate-400">${api.path}</span>
+            </div>
+            <span class="text-xs text-slate-400 shrink-0">SLO ≤ ${api.sloThresholdMs}ms</span>
+          </div>
+
+          <!-- 진행 바: p95 / SLO threshold -->
+          <div class="relative w-full bg-slate-100 rounded-full h-2 mb-2">
+            <div class="${barClr} h-2 rounded-full transition-all duration-500" style="width:${pct.toFixed(1)}%"></div>
+            <div class="absolute right-0 top-0 h-full border-r-2 border-slate-300"></div>
+          </div>
+
+          <!-- 수치 -->
+          <div class="flex items-center justify-between text-xs">
+            <div class="flex gap-4">
+              <span>p95: <span class="font-bold ${p95Clr}">${p95Text}</span></span>
+              <span class="text-slate-400">p99: <span class="font-medium text-slate-600">${p99Text}</span></span>
+            </div>
+            <div class="flex gap-3 text-slate-400">
+              <span>${fmtNum(api.reqsPerMin)} req/min</span>
+              <span class="${srClr} font-medium">${srText} ok</span>
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function fmtNum(n) {
+      return Number(n).toLocaleString();
+    }
+
+    // 5초마다 메트릭 갱신
+    fetchMetrics();
+    setInterval(fetchMetrics, 5000);
   </script>
 
 </body>
