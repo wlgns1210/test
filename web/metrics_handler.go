@@ -28,28 +28,36 @@ func getInfluxBaseURL() string {
 
 // ── 응답 구조체 ───────────────────────────────────────────────────
 
+// availabilityThresholdMs는 가용성 판단 기준 응답시간입니다 (5초).
+// p90 ≤ 5000ms 이면 해당 API를 "가용" 상태로 판단합니다.
+const availabilityThresholdMs = 5000
+
 // APIMetric은 하나의 API 경로에 대한 실시간 지표입니다.
 type APIMetric struct {
-	Name           string  `json:"name"`
-	Path           string  `json:"path"`
-	SLOThresholdMs int     `json:"sloThresholdMs"` // PDF 기준 SLO (ms)
-	TotalReqs      int64   `json:"totalReqs"`      // 최근 5분 전체 요청수
-	SuccessReqs    int64   `json:"successReqs"`    // 최근 5분 성공 요청수
-	WithinSLOReqs  int64   `json:"withinSLOReqs"`  // 최근 5분 SLO 이내 요청수 (성공 기준으로 보정)
-	Throughput     float64 `json:"throughput"`     // 처리율 = 성공/전체 × 100, -1=N/A
-	Efficiency     float64 `json:"efficiency"`     // 효율성 = SLO이내(성공한것만)/전체 × 100, -1=N/A
-	P90Ms          float64 `json:"p90Ms"`          // -1 = 데이터 없음
+	Name              string  `json:"name"`
+	Path              string  `json:"path"`
+	SLOThresholdMs    int     `json:"sloThresholdMs"`    // PDF 기준 SLO (ms)
+	TotalReqs         int64   `json:"totalReqs"`         // 최근 5분 전체 요청수
+	SuccessReqs       int64   `json:"successReqs"`       // 최근 5분 성공 요청수
+	WithinSLOReqs     int64   `json:"withinSLOReqs"`     // 최근 5분 SLO 이내 요청수 (전체 기준)
+	WithinAvailReqs   int64   `json:"withinAvailReqs"`   // 최근 5분 5000ms 이내 요청수
+	Throughput        float64 `json:"throughput"`        // 처리율 = 성공/전체 × 100, -1=N/A
+	Efficiency        float64 `json:"efficiency"`        // 효율성 = SLO이내/전체 × 100, -1=N/A
+	AvailabilityPct   float64 `json:"availabilityPct"`   // 가용성 = 5s이내/전체 × 100, -1=N/A
+	P90Ms             float64 `json:"p90Ms"`             // -1 = 데이터 없음
+	P90Available      bool    `json:"p90Available"`      // p90 ≤ 5000ms 여부
 }
 
 // MetricsPayload는 /api/metrics 엔드포인트의 응답입니다.
 type MetricsPayload struct {
-	Available        bool        `json:"available"`        // InfluxDB 연결 여부
-	TotalReqs        int64       `json:"totalReqs"`        // 최근 1시간 총 요청 수
-	CurrentRPS       float64     `json:"currentRps"`       // 최근 30초 평균 req/s
-	GlobalThroughput float64     `json:"globalThroughput"` // 전체 처리율 %, -1=N/A
-	GlobalEfficiency float64     `json:"globalEfficiency"` // 전체 효율성 %, -1=N/A
-	APIs             []APIMetric `json:"apis"`
-	UpdatedAt        string      `json:"updatedAt"`
+	Available          bool        `json:"available"`          // InfluxDB 연결 여부
+	TotalReqs          int64       `json:"totalReqs"`          // 최근 1시간 총 요청 수
+	CurrentRPS         float64     `json:"currentRps"`         // 최근 30초 평균 req/s
+	GlobalThroughput   float64     `json:"globalThroughput"`   // 전체 처리율 %, -1=N/A
+	GlobalEfficiency   float64     `json:"globalEfficiency"`   // 전체 효율성 %, -1=N/A
+	GlobalAvailability float64     `json:"globalAvailability"` // 전체 가용성 %, -1=N/A
+	APIs               []APIMetric `json:"apis"`
+	UpdatedAt          string      `json:"updatedAt"`
 }
 
 // ── InfluxDB 쿼리 헬퍼 ───────────────────────────────────────────
@@ -169,15 +177,16 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── API별 지표 ─────────────────────────────────────────────
-	var totalAll, successAll, withinAll int64
+	var totalAll, successAll, withinAll, availAll int64
 	for _, t := range sloTargets {
 		m := APIMetric{
-			Name:           t.name,
-			Path:           t.path,
-			SLOThresholdMs: t.sloMs,
-			Throughput:     -1,
-			Efficiency:     -1,
-			P90Ms:          -1,
+			Name:            t.name,
+			Path:            t.path,
+			SLOThresholdMs:  t.sloMs,
+			Throughput:      -1,
+			Efficiency:      -1,
+			AvailabilityPct: -1,
+			P90Ms:           -1,
 		}
 
 		// 전체 요청수 (최근 5분): 성공/실패 모두 포함
@@ -228,6 +237,23 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
 				m.P90Ms = v
+				// p90 ≤ 5000ms 이면 가용 상태로 판단
+				m.P90Available = v <= availabilityThresholdMs
+			}
+		}
+
+		// 가용성 (최근 5분): 전체 요청 중 5000ms 이내 응답 비율
+		// p90 기준 5초 이하 응답을 보장하는지 측정
+		if res, err := influxQuery(fmt.Sprintf(
+			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "value" <= %d AND time > now() - 5m`,
+			t.urlFrag, availabilityThresholdMs,
+		)); err == nil {
+			if v, ok := firstFloat(res); ok {
+				m.WithinAvailReqs = int64(v)
+				availAll += m.WithinAvailReqs
+				if m.TotalReqs > 0 {
+					m.AvailabilityPct = float64(m.WithinAvailReqs) / float64(m.TotalReqs) * 100
+				}
 			}
 		}
 
@@ -235,9 +261,14 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── 전체 효율성 = 전체 SLO이내 / 전체 요청수 ───────────────
-	// 효율성: 전체 요청 중 SLO 기준(0.2초 이내)을 만족한 비율
 	if totalAll > 0 {
 		payload.GlobalEfficiency = float64(withinAll) / float64(totalAll) * 100
+	}
+
+	// ── 전체 가용성 = 전체 5s이내 / 전체 요청수 ────────────────
+	// p90 기준 5초 이하 응답을 보장하는 요청 비율
+	if totalAll > 0 {
+		payload.GlobalAvailability = float64(availAll) / float64(totalAll) * 100
 	}
 	_ = successAll // 처리율(Throughput) 계산에 이미 사용됨
 
