@@ -1,9 +1,38 @@
 [
   {
-    "name": "상품 등록",
+    "name": "user 생성",
+    "url": "http://localhost:8080/v1/user",
+    "method": "POST",
+    "weight": 3,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "requestid": "{{requestid}}",
+      "uuid": "{{uuid}}",
+      "username": "dbdump{{random6}}",
+      "email": "dbdump{{random6}}@example.org",
+      "status_message": "I'm happy"
+    },
+    "expectedStatus": 201
+  },
+  {
+    "name": "user 조회",
+    "url": "http://localhost:8080/v1/user",
+    "method": "GET",
+    "weight": 3,
+    "params": {
+      "email": "dbdump{{random6}}@example.org",
+      "requestid": "{{requestid}}",
+      "uuid": "{{uuid}}"
+    },
+    "expectedStatus": 200
+  },
+  {
+    "name": "product 생성",
     "url": "http://localhost:8080/v1/product",
     "method": "POST",
-    "weight": 7,
+    "weight": 3,
     "headers": {
       "Content-Type": "application/json"
     },
@@ -17,7 +46,7 @@
     "expectedStatus": 201
   },
   {
-    "name": "상품 조회",
+    "name": "product 조회",
     "url": "http://localhost:8080/v1/product",
     "method": "GET",
     "weight": 3,
@@ -29,10 +58,18 @@
     "expectedStatus": 200
   },
   {
-    "name": "헬스체크",
-    "url": "http://localhost:8080/healthcheck",
-    "method": "GET",
-    "weight": 1,
-    "expectedStatus": 200
+    "name": "stress",
+    "url": "http://localhost:8080/v1/stress",
+    "method": "POST",
+    "weight": 6,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "requestid": "{{requestid}}",
+      "uuid": "{{uuid}}",
+      "length": 256
+    },
+    "expectedStatus": 201
   }
 ]

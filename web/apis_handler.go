@@ -15,12 +15,12 @@ func apisFilePath() string {
 
 // generateAPIsFromEndpoint는 엔드포인트 URL 하나로 PDF 명세의 고정 API 목록을 생성합니다.
 //
-// 생성되는 API (총 5개, 모두 weight 3으로 균등 부하):
+// 생성되는 API (총 5개):
 //  user 그룹   : POST /v1/user    → 201  (weight 3)
 //               GET  /v1/user    → 200  (weight 3)
 //  product 그룹: POST /v1/product → 201  (weight 3)
 //               GET  /v1/product → 200  (weight 3)
-//  stress      : POST /v1/stress  → 201  (weight 3)
+//  stress      : POST /v1/stress  → 201  (weight 6)
 func generateAPIsFromEndpoint(endpoint string) []APIEntry {
 	base := strings.TrimRight(endpoint, "/")
 
