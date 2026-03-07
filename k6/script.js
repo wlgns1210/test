@@ -70,8 +70,9 @@ const ABNORMAL_RATE = parseInt(__ENV.ABNORMAL_RATE || '0');
 // ── POST random6 풀 (VU별, 그룹별) ───────────────────────────
 // POST 요청에서 사용된 random6를 최대 200개 저장 후 GET 요청에서 재사용
 // k6에서 모듈 수준 변수는 VU별로 독립 → 공유 없이 안전
-const postRandom6Pool = {}; // { groupIdx: [r6, r6, ...] }
-const MAX_POOL_SIZE   = 200;
+const postRandom6Pool    = {}; // { groupIdx: [r6, r6, ...] }
+const MAX_POOL_SIZE      = 200;
+const MIN_POOL_BEFORE_GET = 3; // GET 허용 전 최소 성공 POST 수 (풀 안정화)
 
 // ── API 설정 로드 ─────────────────────────────────────────────
 const TARGET_CONFIGS = JSON.parse(open('../apis.json'));
@@ -423,11 +424,12 @@ export function runScenario() {
   const groupIdx = parseInt(__ENV.GROUP_INDEX);
   const group    = URL_GROUPS[groupIdx];
 
-  // 풀이 비어있는 경우 POST를 먼저 강제 실행 → GET이 재사용할 데이터 확보
+  // 풀 크기가 MIN_POOL_BEFORE_GET 미만이면 POST 강제 실행
+  // → 충분한 데이터가 쌓인 후에만 GET 허용 (404 방지)
   const pool    = postRandom6Pool[groupIdx];
   const hasPOST = group.some((c) => (c.method || 'POST').toUpperCase() === 'POST');
   let cfg;
-  if (hasPOST && (!pool || pool.length === 0)) {
+  if (hasPOST && (!pool || pool.length < MIN_POOL_BEFORE_GET)) {
     cfg = group.find((c) => (c.method || 'POST').toUpperCase() === 'POST');
   } else {
     cfg = pickFromGroup(group);
