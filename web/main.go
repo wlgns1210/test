@@ -171,9 +171,13 @@ func main() {
 		port = "8888"
 	}
 
-	log.Printf("Load Test Platform UI running at http://localhost:%s", port)
-	log.Printf("  User login  : http://localhost:%s/login", port)
-	log.Printf("  Admin login : http://localhost:%s/login (admin credentials)", port)
+	host := "localhost"
+	if ip := detectPublicIP(); ip != "" {
+		host = ip
+	}
+	log.Printf("Load Test Platform UI running at http://%s:%s", host, port)
+	log.Printf("  User login  : http://%s:%s/login", host, port)
+	log.Printf("  Admin login : http://%s:%s/login (admin credentials)", host, port)
 	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
 
