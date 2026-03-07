@@ -288,16 +288,11 @@ function sendRequest(cfg, groupIdx) {
   } else {
     if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
     if (cfg.body) {
-      // 새 random6 생성 → 풀에 저장 → body에 적용
+      // 새 random6 생성 → body에 적용 (풀 저장은 POST 성공 후로 미룸)
       const r6 = String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
-      if (groupIdx !== undefined) {
-        if (!postRandom6Pool[groupIdx]) postRandom6Pool[groupIdx] = [];
-        postRandom6Pool[groupIdx].push(r6);
-        if (postRandom6Pool[groupIdx].length > MAX_POOL_SIZE) {
-          postRandom6Pool[groupIdx].shift(); // 오래된 항목 제거
-        }
-      }
       body = JSON.stringify(resolveObjectFixed(cfg.body, r6));
+      // r6를 클로저로 캡처해 POST 결과 확인 후 풀에 저장
+      var _pendingR6 = r6;
     }
   }
 
@@ -315,6 +310,15 @@ function sendRequest(cfg, groupIdx) {
     default:
       console.error(`[ERROR] 지원하지 않는 HTTP 메서드: ${method}`);
       return;
+  }
+
+  // POST 성공 시에만 풀에 저장 → 실패한 POST의 r6가 GET에서 재사용되는 것 방지
+  if (_pendingR6 !== undefined && res.status === expected && groupIdx !== undefined) {
+    if (!postRandom6Pool[groupIdx]) postRandom6Pool[groupIdx] = [];
+    postRandom6Pool[groupIdx].push(_pendingR6);
+    if (postRandom6Pool[groupIdx].length > MAX_POOL_SIZE) {
+      postRandom6Pool[groupIdx].shift(); // 오래된 항목 제거
+    }
   }
 
   check(res, {
