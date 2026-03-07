@@ -169,7 +169,7 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ── API별 지표 ─────────────────────────────────────────────
-	var successAll, withinAll int64
+	var totalAll, successAll, withinAll int64
 	for _, t := range sloTargets {
 		m := APIMetric{
 			Name:           t.name,
@@ -187,11 +187,11 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
 				m.TotalReqs = int64(v)
+				totalAll += m.TotalReqs
 			}
 		}
 
 		// 성공 요청수 (최근 5분): status =~ /^2/ → 2xx 응답만 카운트
-		// MEAN(http_req_failed) 역산 방식은 실패 요청이 빠른 경우 오차 발생
 		if res, err := influxQuery(fmt.Sprintf(
 			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "status" =~ /^2/ AND time > now() - 5m`,
 			t.urlFrag,
@@ -205,24 +205,23 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// SLO 이내 성공 요청수 (최근 5분): 2xx 응답 AND 응답시간 ≤ SLO threshold
-		// status =~ /^2/ 필터로 실패 요청(4xx/5xx)이 빠르게 응답해도 제외
+		// SLO 이내 요청수 (최근 5분): 전체 요청 중 응답시간 ≤ SLO threshold
+		// 성공/실패 구분 없이 전체 요청 기준으로 계산
 		if res, err := influxQuery(fmt.Sprintf(
-			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "status" =~ /^2/ AND "value" <= %d AND time > now() - 5m`,
+			`SELECT COUNT("value") FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND "value" <= %d AND time > now() - 5m`,
 			t.urlFrag, t.sloMs,
 		)); err == nil {
 			if v, ok := firstFloat(res); ok {
 				m.WithinSLOReqs = int64(v)
 				withinAll += m.WithinSLOReqs
-				// 효율성 = 성공한 요청 중 SLO 이내 비율
-				if m.SuccessReqs > 0 {
-					m.Efficiency = float64(m.WithinSLOReqs) / float64(m.SuccessReqs) * 100
+				// 효율성 = 전체 요청 중 SLO 이내 비율
+				if m.TotalReqs > 0 {
+					m.Efficiency = float64(m.WithinSLOReqs) / float64(m.TotalReqs) * 100
 				}
 			}
 		}
 
 		// p90 응답시간 (최근 5분): 전체 요청 기준 (2xx 필터 없음 - 실제 부하 반영)
-		// 2xx 필터 적용 시 느리게 실패하는 5xx 요청이 제외되어 p90이 비현실적으로 낮게 나옴
 		if res, err := influxQuery(fmt.Sprintf(
 			`SELECT PERCENTILE("value",90) FROM "http_req_duration" WHERE "target_url" =~ /%s/ AND time > now() - 5m`,
 			t.urlFrag,
@@ -235,11 +234,12 @@ func getMetrics(w http.ResponseWriter, r *http.Request) {
 		payload.APIs = append(payload.APIs, m)
 	}
 
-	// ── 전체 효율성 = 전체 SLO이내 / 전체 성공 요청수 ──────────
-	// 효율성: 성공한 요청 중 SLO 기준을 만족한 비율
-	if successAll > 0 {
-		payload.GlobalEfficiency = float64(withinAll) / float64(successAll) * 100
+	// ── 전체 효율성 = 전체 SLO이내 / 전체 요청수 ───────────────
+	// 효율성: 전체 요청 중 SLO 기준(0.2초 이내)을 만족한 비율
+	if totalAll > 0 {
+		payload.GlobalEfficiency = float64(withinAll) / float64(totalAll) * 100
 	}
+	_ = successAll // 처리율(Throughput) 계산에 이미 사용됨
 
 	json.NewEncoder(w).Encode(payload)
 }

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
+	"syscall"
 	"time"
 )
 
@@ -62,10 +62,11 @@ func startTest(w http.ResponseWriter, r *http.Request) {
 	// 컨텍스트로 프로세스 제어
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// run.sh를 bash로 실행
+	// run.sh를 bash로 실행 (새 프로세스 그룹으로 분리 → 자식 프로세스 포함 킬 가능)
 	cmd := exec.CommandContext(ctx, "bash", "./run.sh")
 	cmd.Dir = projectRoot
 	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// stdout + stderr 통합 파이프
 	// pw: cmd이 쓰는 쪽 / pr: scanner가 읽는 쪽
@@ -127,12 +128,12 @@ func stopTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Windows: taskkill로 프로세스 트리 종료
+	// 프로세스 그룹 전체 종료 (bash + k6 + docker compose 자식 포함)
+	// Setpgid: true 로 시작했으므로 PGID = 프로세스 PID
 	if cmd.Process != nil {
-		pid := cmd.Process.Pid
-		// taskkill /F /T: 자식 프로세스 포함 강제 종료
-		killCmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
-		killCmd.Run() // 에러 무시 (bash가 이미 종료됐을 수 있음)
+		pgid := cmd.Process.Pid
+		// SIGTERM 먼저: k6가 graceful shutdown 하도록
+		_ = syscall.Kill(-pgid, syscall.SIGTERM)
 	}
 
 	if cancel != nil {
