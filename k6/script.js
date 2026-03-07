@@ -67,6 +67,12 @@ const RATE          = parseInt(__ENV.RATE          || '56');
 const PATTERN       = (__ENV.PATTERN     || 'rampup').toLowerCase();
 const ABNORMAL_RATE = parseInt(__ENV.ABNORMAL_RATE || '0');
 
+// ── POST random6 풀 (VU별, 그룹별) ───────────────────────────
+// POST 요청에서 사용된 random6를 최대 200개 저장 후 GET 요청에서 재사용
+// k6에서 모듈 수준 변수는 VU별로 독립 → 공유 없이 안전
+const postRandom6Pool = {}; // { groupIdx: [r6, r6, ...] }
+const MAX_POOL_SIZE   = 200;
+
 // ── API 설정 로드 ─────────────────────────────────────────────
 const TARGET_CONFIGS = JSON.parse(open('../apis.json'));
 
@@ -229,8 +235,36 @@ function resolveObject(obj) {
   return result;
 }
 
+// r6를 고정값으로 치환 (POST 풀에서 꺼낸 random6를 GET에서 재사용할 때 사용)
+function resolveObjectFixed(obj, r6) {
+  if (!obj) return null;
+  const result = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v !== 'string') {
+      result[k] = resolveValue(v);             // 숫자 등 비문자열은 그대로
+    } else if (v === '{{random6}}') {
+      result[k] = r6;
+    } else if (v === '{{requestid}}') {
+      result[k] = generateRequestId();
+    } else if (v === '{{uuid}}') {
+      result[k] = generateUUID();
+    } else if (v === '{{randomInt}}') {
+      result[k] = Math.floor(Math.random() * 9000) + 1000;
+    } else {
+      // 부분 문자열 치환 (e.g. "dbdump{{random6}}@example.org")
+      result[k] = v
+        .replace(/\{\{random6\}\}/g,   r6)
+        .replace(/\{\{requestid\}\}/g, () => generateRequestId())
+        .replace(/\{\{uuid\}\}/g,      () => generateUUID())
+        .replace(/\{\{randomInt\}\}/g, () => String(Math.floor(Math.random() * 9000) + 1000));
+    }
+  }
+  return result;
+}
+
 // ── HTTP 요청 전송 ────────────────────────────────────────────
-function sendRequest(cfg) {
+// groupIdx: URL 그룹 인덱스 (POST random6 풀 키로 사용)
+function sendRequest(cfg, groupIdx) {
   const method   = (cfg.method || 'POST').toUpperCase();
   const headers  = Object.assign({ 'User-Agent': 'k6-load-test/1.0' }, cfg.headers || {});
   const expected = cfg.expectedStatus || 200;
@@ -240,7 +274,12 @@ function sendRequest(cfg) {
 
   if (method === 'GET' || method === 'DELETE') {
     if (cfg.params) {
-      const resolved = resolveObject(cfg.params);
+      // POST 풀에서 random6 재사용 → 없으면 신규 생성 (폴백)
+      const pool = postRandom6Pool[groupIdx];
+      const r6   = (pool && pool.length > 0)
+        ? pool[Math.floor(Math.random() * pool.length)]
+        : String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+      const resolved = resolveObjectFixed(cfg.params, r6);
       const qs = Object.entries(resolved)
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
         .join('&');
@@ -249,7 +288,16 @@ function sendRequest(cfg) {
   } else {
     if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
     if (cfg.body) {
-      body = JSON.stringify(resolveObject(cfg.body));
+      // 새 random6 생성 → 풀에 저장 → body에 적용
+      const r6 = String(Math.floor(Math.random() * 1_000_000)).padStart(6, '0');
+      if (groupIdx !== undefined) {
+        if (!postRandom6Pool[groupIdx]) postRandom6Pool[groupIdx] = [];
+        postRandom6Pool[groupIdx].push(r6);
+        if (postRandom6Pool[groupIdx].length > MAX_POOL_SIZE) {
+          postRandom6Pool[groupIdx].shift(); // 오래된 항목 제거
+        }
+      }
+      body = JSON.stringify(resolveObjectFixed(cfg.body, r6));
     }
   }
 
@@ -374,7 +422,7 @@ export function runScenario() {
   if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
     sendAbnormalRequest(cfg);
   } else {
-    sendRequest(cfg);
+    sendRequest(cfg, groupIdx);
   }
 }
 
