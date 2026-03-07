@@ -5,10 +5,13 @@ import (
 	"embed"
 	"encoding/json"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 //go:embed templates
@@ -36,6 +39,44 @@ func sessionFromContext(ctx context.Context) *Session {
 		return nil
 	}
 	return v.(*Session)
+}
+
+// detectPublicIP는 EC2 IMDSv2를 통해 퍼블릭 IP를 감지합니다.
+// EC2가 아니거나 실패 시 빈 문자열을 반환합니다.
+func detectPublicIP() string {
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// IMDSv2: 토큰 발급
+	tokenReq, _ := http.NewRequest("PUT", "http://169.254.169.254/latest/api/token", nil)
+	tokenReq.Header.Set("X-aws-ec2-metadata-token-ttl-seconds", "21600")
+	tokenResp, err := client.Do(tokenReq)
+	if err == nil {
+		defer tokenResp.Body.Close()
+		token, _ := io.ReadAll(tokenResp.Body)
+
+		ipReq, _ := http.NewRequest("GET", "http://169.254.169.254/latest/meta-data/public-ipv4", nil)
+		ipReq.Header.Set("X-aws-ec2-metadata-token", strings.TrimSpace(string(token)))
+		ipResp, err := client.Do(ipReq)
+		if err == nil {
+			defer ipResp.Body.Close()
+			ip, _ := io.ReadAll(ipResp.Body)
+			if v := strings.TrimSpace(string(ip)); v != "" {
+				return v
+			}
+		}
+	}
+
+	// IMDSv1 폴백
+	resp, err := client.Get("http://169.254.169.254/latest/meta-data/public-ipv4")
+	if err == nil {
+		defer resp.Body.Close()
+		ip, _ := io.ReadAll(resp.Body)
+		if v := strings.TrimSpace(string(ip)); v != "" {
+			return v
+		}
+	}
+
+	return ""
 }
 
 // findProjectRoot는 run.sh가 존재하는 디렉토리를 탐색하여 프로젝트 루트를 반환합니다.
@@ -77,10 +118,14 @@ func main() {
 	projectRoot = findProjectRoot()
 	log.Printf("Project root: %s", projectRoot)
 
-	// Grafana URL (환경변수 GRAFANA_URL, 기본값 http://localhost)
+	// Grafana URL (환경변수 GRAFANA_URL 우선, 없으면 EC2 퍼블릭 IP 자동 감지)
 	grafanaURL = os.Getenv("GRAFANA_URL")
 	if grafanaURL == "" {
-		grafanaURL = "http://localhost"
+		if ip := detectPublicIP(); ip != "" {
+			grafanaURL = "http://" + ip
+		} else {
+			grafanaURL = "http://localhost"
+		}
 	}
 	log.Printf("Grafana URL: %s", grafanaURL)
 
