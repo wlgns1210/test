@@ -194,6 +194,29 @@ export const options = {
   },
 };
 
+// ── 워밍업 설정 ───────────────────────────────────────────────
+// 전체 테스트 시간의 초반 15%는 POST 전용 → DB에 충분한 데이터 확보 후 GET 시작
+function parseDurationMs(d) {
+  if (!d || typeof d !== 'string') return 0;
+  let ms = 0;
+  const re = /(\d+(?:\.\d+)?)(h|m|s|ms)/g;
+  let match;
+  while ((match = re.exec(d)) !== null) {
+    const v = parseFloat(match[1]);
+    switch (match[2]) {
+      case 'h':  ms += v * 3600000; break;
+      case 'm':  ms += v * 60000;   break;
+      case 's':  ms += v * 1000;    break;
+      case 'ms': ms += v;           break;
+    }
+  }
+  return ms;
+}
+
+const TOTAL_DURATION_MS   = buildStages().reduce((sum, st) => sum + parseDurationMs(st.duration), 0);
+const WARMUP_ONLY_POST_MS = Math.floor(TOTAL_DURATION_MS * 0.15); // 전체의 15%
+const _testInitMs         = Date.now(); // VU 초기화 시점 ≈ 테스트 시작 시점
+
 // ── 유틸 함수 ─────────────────────────────────────────────────
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -424,12 +447,13 @@ export function runScenario() {
   const groupIdx = parseInt(__ENV.GROUP_INDEX);
   const group    = URL_GROUPS[groupIdx];
 
-  // 풀 크기가 MIN_POOL_BEFORE_GET 미만이면 POST 강제 실행
-  // → 충분한 데이터가 쌓인 후에만 GET 허용 (404 방지)
-  const pool    = postRandom6Pool[groupIdx];
-  const hasPOST = group.some((c) => (c.method || 'POST').toUpperCase() === 'POST');
+  const pool     = postRandom6Pool[groupIdx];
+  const hasPOST  = group.some((c) => (c.method || 'POST').toUpperCase() === 'POST');
+  // ① 전체 테스트 시간의 15% 워밍업 구간: POST 전용으로 DB 데이터 확보
+  // ② 워밍업 이후에도 풀이 MIN_POOL_BEFORE_GET 미만이면 POST 강제
+  const inWarmup = (Date.now() - _testInitMs) < WARMUP_ONLY_POST_MS;
   let cfg;
-  if (hasPOST && (!pool || pool.length < MIN_POOL_BEFORE_GET)) {
+  if (hasPOST && (inWarmup || !pool || pool.length < MIN_POOL_BEFORE_GET)) {
     cfg = group.find((c) => (c.method || 'POST').toUpperCase() === 'POST');
   } else {
     cfg = pickFromGroup(group);
