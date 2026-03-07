@@ -417,7 +417,17 @@ function sendAbnormalRequest(cfg) {
 // GROUP_INDEX로 URL 그룹을 찾고, 그룹 내에서 weight 비율로 method 선택
 export function runScenario() {
   const groupIdx = parseInt(__ENV.GROUP_INDEX);
-  const cfg      = pickFromGroup(URL_GROUPS[groupIdx]);
+  const group    = URL_GROUPS[groupIdx];
+
+  // 풀이 비어있는 경우 POST를 먼저 강제 실행 → GET이 재사용할 데이터 확보
+  const pool    = postRandom6Pool[groupIdx];
+  const hasPOST = group.some((c) => (c.method || 'POST').toUpperCase() === 'POST');
+  let cfg;
+  if (hasPOST && (!pool || pool.length === 0)) {
+    cfg = group.find((c) => (c.method || 'POST').toUpperCase() === 'POST');
+  } else {
+    cfg = pickFromGroup(group);
+  }
 
   if (ABNORMAL_RATE > 0 && Math.random() * 100 < ABNORMAL_RATE) {
     sendAbnormalRequest(cfg);
